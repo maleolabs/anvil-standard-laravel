@@ -1,0 +1,76 @@
+# CI pipeline of the Laravel delivery lifecycle standard (TS-016-03-01).
+#
+# Per-repo CI responsibility (ADR-025 §3.5, decision 5): each standard's own
+# CI builds and validates the standard from its own repository; Core CI never
+# builds standard content. This workflow covers the three responsibilities of
+# the standard pipeline:
+#   1. build the standard executable from this repository
+#      (go build ./cmd/laravel-adapter -> anvil-adapter-laravel);
+#   2. run the standard's own test suite (the Tests part of the standard
+#      structure, ADR-021 §5.4; go test ./...);
+#   3. validate the standard's declared contract version and manifest
+#      consistency (scripts/validate-manifest.sh).
+#
+# Green gate: a failing pipeline blocks release production. Merges to
+# develop/main require this workflow to pass (protected-branch status check),
+# and release candidates are produced only from a green integration branch.
+# The release publication pipeline itself is TS-016-03-02 scope and is
+# deliberately NOT part of this file.
+#
+# Manifest validation nuance: scripts/validate-manifest.sh validates the
+# SOURCE manifest (manifest/registry-metadata.json) for INTERNAL consistency
+# only — NOT for registry parseability. The source manifest intentionally
+# lacks the release-time fields (distribution/lifecycle/trust), which the
+# release pipeline populates at publication (TS-016-03-02); the source
+# manifest is not a valid strict-parser registry document by design.
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the standard executable
+        run: go build -o anvil-adapter-laravel ./cmd/laravel-adapter
+
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Static analysis (go vet)
+        run: go vet ./...
+
+      - name: Formatting check (gofmt)
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run the standard's test suite
+        run: go test -race -count=1 ./...
+
+  validate-manifest:
+    name: Validate standard manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate source manifest consistency
+        run: bash scripts/validate-manifest.sh
