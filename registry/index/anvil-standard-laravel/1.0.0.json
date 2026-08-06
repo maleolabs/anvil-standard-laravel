@@ -1,0 +1,36 @@
+{
+  "$schema": "urn:anvil:spec:registry-metadata:1.0.0",
+  "title": "Laravel Delivery Lifecycle Standard",
+  "description": "Registry metadata for the Laravel delivery lifecycle standard (maleolabs/anvil-standard-laravel): the distributable unit of Laravel framework lifecycle knowledge for the Anvil Runtime. This document is the source manifest of the standard; the release pipeline publishes the release-specific metadata document (same identity, release version, content digests and attestation over the release artifact) per ADR-030 and TS-016-03-02.",
+  "id": "anvil-standard-laravel",
+  "version": "1.0.0",
+  "contractVersion": "1.0.0",
+  "capability": {
+    "frameworkVersion": [
+      "10.0.0",
+      "11.0.0",
+      "12.0.0"
+    ]
+  },
+  "distribution": {
+    "type": "github-releases",
+    "location": "https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0-test/anvil-standard-laravel-1.0.0.tar.gz"
+  },
+  "lifecycle": {
+    "state": "published"
+  },
+  "trust": {
+    "contentDigests": [
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "bfafae7e201d08e194f4e5ef1035e0a2351faa7da5c8e64d109d876b30fc81f2"
+      }
+    ],
+    "attestation": {
+      "algorithm": "ed25519",
+      "signature": "JYiv1oEhr3FmAAFVLriF5Tby+6JexwsP5/yvoPxUfXNWNqAz89Am0JkuGp6cAoQ1j4nWilUGmeipGkUZao3oDw==",
+      "publicKey": "3vD8GRFr5gJbWKZjZkk8t6Nr5yGHWG+Pn9d1pyuSUPA="
+    }
+  }
+}
