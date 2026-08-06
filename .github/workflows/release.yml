@@ -59,15 +59,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # actions/checkout v4.2.2
+      # actions/checkout v4.2.2 (exact tag commit 11bd71901bbe5b1630ceea73d27597364c9af683)
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 
-      # actions/setup-go v5.4.0
+      # actions/setup-go v5.4.0 (exact tag commit 0aaccfd150d50ccaeb58ebd88d36e91967a5f35b)
       - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
         with:
           go-version-file: go.mod
 
@@ -162,16 +162,23 @@ jobs:
           git add "${INDEX_PATH}"
           git commit -m "chore(registry): publish ${ID} ${VERSION} index document"
           # Retryable push: rebase onto origin/main first so concurrent
-          # index publications (independent per standard repo) never clobber
-          # each other, then push. A single retry covers transient races.
+          # index publications (independent per standard repo) never
+          # clobber each other. push_ok tracks success so a double failure
+          # fails the step loudly instead of silently succeeding.
+          push_ok=0
           for attempt in 1 2; do
-            if git push origin HEAD:main 2>/dev/null; then
+            if git push origin HEAD:main; then
+              push_ok=1
               break
             fi
             if [ "$attempt" -eq 1 ]; then
               git pull --rebase origin main
             fi
           done
+          if [ "$push_ok" != "1" ]; then
+            echo "::error::failed to publish the registry index document to main (${INDEX_PATH}); the GitHub release was created, but the index was not updated — resolve the push failure and re-run this step"
+            exit 1
+          fi
 
           echo "index document published: ${INDEX_PATH}"
           echo "discover with: anvil standard list --index <checkout of this repository>"
