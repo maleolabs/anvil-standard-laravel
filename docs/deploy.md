@@ -86,17 +86,21 @@ Install, activate, and rollback all invoke the adapter executable `anvil-adapter
 adapter executable "anvil-adapter-laravel" not found on PATH: ... (install the adapter binary or configure its path)
 ```
 
-Install it once per server — the adapter is distributed with every Anvil release:
+Install it once per server. **Interim distribution path:** standard releases
+are not published yet (registry publication is TS-016-03-02, the
+installer/discovery switch-over is TS-016-04-01), so the Laravel standard
+executable is **not yet shipped with Anvil releases** — build it from this
+repository:
 
 ```bash
-# At install time — CLI plus adapter
-curl -fsSL https://github.com/maleolabs/anvil/releases/latest/download/install.sh | sh -s -- --with-adapters laravel
-
-# Post-install — one command
-anvil adapter install laravel
+go build -o anvil-adapter-laravel ./cmd/laravel-adapter
+sudo mv anvil-adapter-laravel /usr/local/bin/
 ```
 
-`anvil update` refreshes installed adapters automatically. For adapter development, a manual build remains possible: `go build -o anvil-adapter-laravel ./cmd/laravel-adapter && sudo mv anvil-adapter-laravel /usr/local/bin/`. See the [Laravel adapter guide](README.md).
+Once standard releases are published, the versioned release assets become
+installable at setup time (`install.sh --with-adapters laravel`) or
+post-install (`anvil adapter install laravel`), and `anvil update` refreshes
+installed adapters automatically. See the [Laravel adapter guide](README.md).
 
 ## Server directory layout (per project)
 
@@ -109,4 +113,4 @@ anvil adapter install laravel
 └── runtime-state.json    # active release pointer
 ```
 
-See also: [Verification checks](verify.md) · [Manifest commands](manifest.md) · [Glossary](../glossary.md)
+See also: [Verification checks](verify.md) · [Manifest commands](manifest.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)

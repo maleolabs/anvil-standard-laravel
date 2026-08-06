@@ -42,17 +42,17 @@ decision 3). No hardcoded framework validation rules exist in the runtime.
 
 When the installed standard declares no config extension content, the
 framework section passes through (a standard may declare nothing in a
-category — command-contract §4.1). See [limitations](../limitations.md)
+category — command-contract §4.1). See [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md)
 item 6.
 
 ## Status: reserved, not yet effective
 
 **Note:** these keys are recognized and validated, but not yet consumed anywhere.
 
-- There is **no dedicated `framework.laravel:` section in `anvil.yaml`** when the installed delivery lifecycle standard supplies no config extension content — `anvil init --framework laravel` writes the section only when the resolved standard's record carries content (keys with declared defaults, TS-015-03-01); see [limitations](../limitations.md) item 3
+- There is **no dedicated `framework.laravel:` section in `anvil.yaml`** when the installed delivery lifecycle standard supplies no config extension content — `anvil init --framework laravel` writes the section only when the resolved standard's record carries content (keys with declared defaults, TS-015-03-01); see [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) item 3
 - The values are **not used** by the build pipeline, activation phases, or any other flow yet
 - They are declared by the adapter's `extension` command and validated by its `validate` command — the plumbing exists, the consumers do not
 
-Until consumption lands, treat these keys as a **reserved contract**: their names, defaults, and validation rules are stable, but setting them has no effect on behavior. Tracked in [limitations](../limitations.md).
+Until consumption lands, treat these keys as a **reserved contract**: their names, defaults, and validation rules are stable, but setting them has no effect on behavior. Tracked in [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md).
 
-See also: [Build pipeline](build.md) · [Deploy](deploy.md) · [Glossary](../glossary.md)
+See also: [Build pipeline](build.md) · [Deploy](deploy.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)

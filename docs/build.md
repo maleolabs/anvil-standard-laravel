@@ -64,6 +64,6 @@ pipeline:
 
 The Laravel adapter executable also declares a build pipeline (composer → npm → `config:cache` → `route:cache` → `view:cache`). When the Core invokes an adapter's build command, the subprocess is bounded to **15 minutes** — longer than other adapter operations (30 seconds) because builds routinely include dependency installation and asset compilation.
 
-**Current status:** `anvil server release build <project-id>` invokes the adapter executable's build pipeline with the 15-minute bound enforced. `anvil pipeline build` still executes the pipeline YAML directly and does **not** invoke the adapter executable — the local engine path remains a separate deferral (ADR-020 §3). See [limitations](../limitations.md).
+**Current status:** `anvil server release build <project-id>` invokes the adapter executable's build pipeline with the 15-minute bound enforced. `anvil pipeline build` still executes the pipeline YAML directly and does **not** invoke the adapter executable — the local engine path remains a separate deferral (ADR-020 §3). See [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md).
 
 See also: [Init](init.md) — how the template is generated · [Deploy](deploy.md)

@@ -1,5 +1,8 @@
 // Package contracts defines the stable command contract exchanged between
-// the Anvil Core and Framework Adapters via subprocess invocation.
+// the Anvil Core and delivery lifecycle standards via subprocess
+// invocation — the standard-side mirror of the Core contract types
+// (maleolabs.com/anvil/internal/contracts; the JSON wire format is the
+// subprocess contract, ADR-025 §3.4). These tests lock the wire shape.
 //
 // Reference: TS-P7-01, TS-P7-02, EPIC-007 C-1
 package contracts

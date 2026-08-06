@@ -49,4 +49,4 @@ There is a **documented divergence** between the two command surfaces:
 
 The manifest strings are the *metadata* form; the executable phase table is the *behavior* Anvil runs today during `server release activate` (see [deploy.md](deploy.md)). This divergence is a deliberate, documented decision — it must not be "fixed" by aligning one to the other.
 
-See also: [Deploy](deploy.md) — the executable activation pipeline · [Limitations](../limitations.md)
+See also: [Deploy](deploy.md) — the executable activation pipeline · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md)

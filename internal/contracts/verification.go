@@ -1,18 +1,26 @@
 // Package contracts defines the stable command contract exchanged between
-// the Anvil Core and Framework Adapters via subprocess invocation.
+// the Anvil Core and delivery lifecycle standards via subprocess
+// invocation.
 //
-// Per 004-review-resolutions D1, Core↔Adapter integration is a CLI
-// subprocess command contract. Adapters are standalone executables in any
-// language; the Core invokes them through the Process Runner (ADR-008)
-// with structured JSON input, and adapters return structured JSON output
-// with a defined exit code convention (ADR-010 §8.1). No Go interfaces,
-// no in-process calls, and no plugin mechanism are used.
+// This package is the standard-side mirror of the Core's contract types
+// (maleolabs.com/anvil/internal/contracts, EPIC-014/EPIC-015): the JSON
+// wire format is the subprocess contract (ADR-025 §3.4 — the contract is
+// preserved unchanged across the repository split). The types are data
+// payloads only — they carry the contract between Core and standards and
+// do not define behavior. The JSON tags reproduce the Core field names
+// exactly; changing a tag or field name here breaks the wire contract.
+// Keep this package in sync with the Core mirror when the contract
+// evolves.
 //
-// The types in this package are data payloads only. They carry the
-// contract between Core and adapters; they do not define behavior.
+// Per 004-review-resolutions D1, Core↔Standard integration is a CLI
+// subprocess command contract. Standards are standalone executables in
+// any language; the Core invokes them through the Process Runner
+// (ADR-008) with structured JSON input, and standards return structured
+// JSON output with a defined exit code convention (ADR-010 §8.1). No Go
+// interfaces, no in-process calls, and no plugin mechanism are used.
 //
 // Reference: TS-P7-01, TS-P7-02, EPIC-007 C-1, ADR-009, ADR-016,
-// 004-review-resolutions D1
+// ADR-021, ADR-025, 004-review-resolutions D1
 package contracts
 
 // VerificationCheck describes a verification check that an adapter

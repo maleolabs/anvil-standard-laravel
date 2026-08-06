@@ -72,7 +72,7 @@ The values come from the installed standard, never from the runtime (the Core ow
 
 Anvil's compiled default excludes strip `vendor/` and `node_modules/` from packaged artifacts — correct for most compiled projects. For Laravel, `vendor/` is **runtime-critical** (Composer autoloading, framework code), and the `vendor_present` verification check (check #1) fails at install without it. Because the Core no longer applies framework-specific artifact defaults, a Laravel project initialized after TS-015-01-03 packages **without** `vendor/`.
 
-Config extension content (TS-015-03-01) and template content (TS-015-02-03) do **not** close this gap: extension content carries framework-namespaced config keys only (`framework.<name>.*`), and template content supplies pipeline files only — nothing maps either onto the Core-owned `artifact.exclude` key. Closing the gap needs a mechanism that can supply or adjust Core artifact defaults — standard content extraction (EPIC-016/EPIC-018 standard content). See [limitations item 6](../limitations.md) for the full state.
+Config extension content (TS-015-03-01) and template content (TS-015-02-03) do **not** close this gap: extension content carries framework-namespaced config keys only (`framework.<name>.*`), and template content supplies pipeline files only — nothing maps either onto the Core-owned `artifact.exclude` key. Closing the gap needs a mechanism that can supply or adjust Core artifact defaults — standard content extraction (EPIC-016/EPIC-018 standard content). See [limitations item 6](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) for the full state.
 
 To restore `vendor/` today, override `artifact.exclude` in `anvil.yaml` with the compiled defaults minus `vendor/**` (see [verify.md](verify.md) — do **not** use `artifact.include: [vendor/**]`: a non-empty include list acts as a strict whitelist and would drop every non-vendor file).
 
@@ -135,10 +135,13 @@ When the installed standard **does** carry template content (TS-015-02-03), the 
 
 This is distinct from the standard-missing hard-fail: an **installed standard** is required before initialization starts (TS-015-02-02, [Standard resolution](#standard-resolution)); the adapter is only consulted for template content after the declaration resolved.
 
-Recovery after installing the adapter:
+Recovery after installing the adapter (interim: standard releases are not
+published yet — TS-016-03-02 — so build from source and place the binary on
+PATH; `anvil adapter install laravel` serves once releases exist):
 
 ```bash
-anvil adapter install laravel          # or place anvil-adapter-laravel on PATH
+go build -o anvil-adapter-laravel ./cmd/laravel-adapter   # from this repository
+sudo mv anvil-adapter-laravel /usr/local/bin/             # or place it on PATH
 anvil adapter use laravel              # regenerates the adapter-owned template
 ```
 
@@ -149,10 +152,10 @@ Template generation is non-destructive (TS-P7-28 AC-1): existing pipeline files 
 | Command | Result |
 |---|---|
 | `anvil init my-app --framework laravel` | Works — resolves the declared framework to the installed delivery lifecycle standard `anvil-standard-laravel` (TS-015-02-01) and creates a Laravel project with the standard-supplied build template (TS-015-02-03) — or the adapter-owned template while the standard declares no template content (interim, ADR-020). See [standard resolution](#standard-resolution) |
-| `anvil init my-app --framework flutter` | Works — creates a Flutter project with a platform-aware build template (web / apk / ios). See the [limitations](../limitations.md) page for the Flutter wiki status |
+| `anvil init my-app --framework flutter` | Works — creates a Flutter project with a platform-aware build template (web / apk / ios). See the [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) page for the Flutter wiki status |
 | `anvil init my-app --framework symfony` | Works when `anvil-standard-symfony` is installed — the declaration is stored in `anvil.yaml`; template generation is standard-driven (a standard without template content falls back to the adapter; a missing `anvil-adapter-symfony` produces the warning above, no pipeline files). Without the installed standard, initialization HARD-FAILS with the standard-missing error (TS-015-02-02) |
 
-There is **no "unknown framework" error**: the Core owns no framework whitelist (TS-015-01-03, ADR-026 decision 1). Framework resolution — including the standard-missing HARD-FAIL for explicit declarations — is standard-driven (TS-015-02-01, TS-015-02-02, [limitations item 8](../limitations.md)).
+There is **no "unknown framework" error**: the Core owns no framework whitelist (TS-015-01-03, ADR-026 decision 1). Framework resolution — including the standard-missing HARD-FAIL for explicit declarations — is standard-driven (TS-015-02-01, TS-015-02-02, [limitations item 8](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md)).
 
 ## Standard resolution
 
@@ -194,7 +197,7 @@ Resolution: install the standard with 'anvil standard install anvil-standard-lar
 
 - Does not create runtime state (releases, artifacts, execution history)
 - Does not scaffold Laravel application files (controllers, migrations, Blade views, etc.) — Anvil is a deployment tool, not a Laravel installer
-- Does not install the adapter binary (see [limitations](../limitations.md))
+- Does not install the adapter binary (see [limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md))
 - Does not whitelist-validate the framework name (see [Framework selection](#framework-selection)); a declaration still requires its installed delivery lifecycle standard (TS-015-02-02, [Standard resolution](#standard-resolution))
 - Does not apply framework config defaults from the runtime — the Core owns no framework config keys or defaults (TS-015-01-03); `framework.<name>.*` defaults are written only from the installed standard's config extension content (TS-015-03-01, see [Framework config extension section](#framework-config-extension-section-when-the-standard-supplies-content))
 - Does not supply pipeline template content from the runtime — the Core owns no template content (TS-015-01-02); `.anvil/pipelines/` files come from the installed standard's template content (TS-015-02-03) or, interim, from the installed adapter's `template` command

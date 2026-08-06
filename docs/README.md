@@ -25,26 +25,19 @@ The Laravel adapter gives Anvil Laravel-specific behavior for building, packagin
 ## Prerequisites
 
 - **Anvil CLI** — installed and on `PATH`
-- **Adapter binary `anvil-adapter-laravel`** — on `PATH` (required for server install/activate/rollback; install it with `install.sh --with-adapters laravel` or `anvil adapter install laravel` — see [Install the adapter](#install-the-adapter))
+- **Adapter binary `anvil-adapter-laravel`** — on `PATH` (required for server install/activate/rollback; interim install path: build from source per [Install the adapter](#install-the-adapter-interim--build-from-source) — standard releases are not published yet)
 - On the server / build machine: **PHP** (with the `artisan` entrypoint), **Composer**, and **Node.js/npm** (for the asset build)
 
-## Install the adapter
+## Install the adapter (interim — build from source)
 
-The adapter binary ships with every Anvil release as `anvil-adapter-laravel-<os>-<arch>` (checksum-verified against `SHA256SUMS.txt`). Install it at setup time or per project:
+> **Interim distribution path.** Standard releases are not published yet:
+> registry publication (TS-016-03-02) and the installer/discovery
+> switch-over (TS-016-04-01) are pending, so the Laravel standard
+> executable is **not yet shipped with Anvil releases** and the
+> `install.sh --with-adapters laravel` / `anvil adapter install laravel`
+> paths do not serve it yet. Until then, build it from this repository.
 
-```bash
-# At install time — CLI plus adapter
-curl -fsSL https://github.com/maleolabs/anvil/releases/latest/download/install.sh | sh -s -- --with-adapters laravel
-
-# Post-install — one command
-anvil adapter install laravel
-```
-
-`anvil update` refreshes installed adapters automatically (refresh-only — it never installs new ones). Remove the adapter with `anvil adapter uninstall laravel`.
-
-## Build from source (development)
-
-Manual builds are an option for adapter development, not the standard install path:
+**Build from source (the interim install path):**
 
 ```bash
 go build -o anvil-adapter-laravel ./cmd/laravel-adapter
@@ -57,6 +50,13 @@ Anvil resolves the adapter as `anvil-adapter-laravel` on `PATH`. If it is missin
 ```text
 adapter executable "anvil-adapter-laravel" not found on PATH: ... (install the adapter binary or configure its path)
 ```
+
+Once standard releases are published (TS-016-03-02), the standard release
+pipeline produces versioned `anvil-adapter-laravel-<os>-<arch>` assets
+(checksum-verified), installable at setup time (`install.sh
+--with-adapters laravel`) or post-install (`anvil adapter install laravel`),
+with `anvil update` refreshing installed adapters (refresh-only — it never
+installs new ones) and `anvil adapter uninstall laravel` removing them.
 
 ## Quick start
 
@@ -100,4 +100,4 @@ anvil server release rollback my-app
 | [manifest.md](manifest.md) | Activation/rollback commands in the artifact manifest |
 | [config.md](config.md) | `framework.laravel.*` keys (reserved) |
 
-See also: [Adapters Wiki](../README.md) · [Limitations](../limitations.md) · [Glossary](../glossary.md)
+See also: [Adapters Wiki](../README.md) · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)
