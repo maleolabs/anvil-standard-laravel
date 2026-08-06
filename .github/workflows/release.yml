@@ -1,0 +1,184 @@
+# Release pipeline of the Laravel delivery lifecycle standard
+# (TS-016-03-02; ADR-023, ADR-030).
+#
+# Triggered by pushing a git tag matching v* (e.g. v1.0.0, v1.0.0-test).
+# STABLE releases are cut from main (the release branch): the tag must
+# point at a commit on main (asserted in this workflow). TEST / PRE-RELEASE
+# tags (suffix -test/-pre[.N]) may come from any branch: they create a
+# GitHub pre-release with assets but NEVER touch the static registry index
+# on main (the stable version namespace stays clean — see docs/release.md).
+#
+# The workflow:
+#   1. extracts the version from the tag (arrives via env, never shell
+#      interpolation) and validates it with a FULLY-ANCHORED regex BEFORE
+#      the value is used anywhere (shell, paths, commit messages);
+#   2. asserts STABLE tags point at a commit on origin/main (releases are
+#      cut from main); pre-release tags are exempt;
+#   3. runs the release green gate — the same quality steps as the T-005
+#      CI pipeline (build, vet, gofmt, tests, manifest validation): a
+#      failing gate aborts the release;
+#   4. builds the standard executable for the release platforms
+#      (linux/darwin × amd64/arm64), packages the release archive, derives
+#      and signs the registry metadata document with REAL content digests
+#      and an Ed25519 publisher attestation (scripts/release.sh);
+#   5. creates the GitHub Release (stable, or pre-release for -test/-pre
+#      tags) with the artifacts + the registry metadata document;
+#   6. STABLE releases only: publishes the derived index document
+#      (registry/index/<id>/<v>.json) to main — the add-only static
+#      registry index (ADR-030; index.go layout), so the standard is
+#      discoverable through the registry flow.
+#
+# Signing: when the repository has a RELEASE_SIGNING_KEY secret (base64
+# PEM PKCS#8 Ed25519 private key), the pipeline signs with that STABLE key
+# (anchors stay stable across releases); without the secret, a fresh
+# release-time key is generated per release (docs/release.md — the trust
+# semantics of both modes are documented there).
+#
+# The registry metadata version is the tag version without the 'v' prefix;
+# a tag suffix (-test/-pre[.N]) marks a GitHub pre-release and is stripped
+# from the registry metadata version (plain semver only).
+#
+# Reference: TS-016-03-02, ADR-022 §3, ADR-023 §3, ADR-030 §3
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # actions/checkout v4.2.2 (exact tag commit 11bd71901bbe5b1630ceea73d27597364c9af683)
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      # actions/setup-go v5.4.0 (exact tag commit 0aaccfd150d50ccaeb58ebd88d36e91967a5f35b)
+      - name: Set up Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b
+        with:
+          go-version-file: go.mod
+
+      # The tag arrives via env — it is NEVER interpolated into the shell.
+      # Fully-anchored validation happens here, BEFORE the value is used
+      # anywhere (shell, paths, commit messages). Only the validated value
+      # is exported as a workflow output.
+      - name: Extract and validate the tag
+        id: version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::tag '$TAG_NAME' is not a valid release tag (must match ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$)"
+            exit 1
+          fi
+          VERSION="${TAG_NAME#v}"
+          if [[ "$TAG_NAME" == *-* ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG_NAME (version $VERSION, prerelease: $PRERELEASE)"
+
+      # Stable releases are cut from main (docs/release.md): the tagged
+      # commit must be an ancestor of origin/main. Pre-release/test tags
+      # are exempt — they may come from any branch.
+      - name: Assert stable tag is on main
+        if: steps.version.outputs.prerelease == 'false'
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          TAG_SHA="$(git rev-parse "${TAG_NAME}^{commit}")"
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "::error::stable release tag ${TAG_NAME} does not point at a commit on origin/main — stable releases are cut from main (promote develop to main, then tag). Pre-release tags (-test/-pre suffix) are exempt from this check."
+            exit 1
+          fi
+          echo "stable tag ${TAG_NAME} is on main: PASS"
+
+      # Release green gate: the same quality steps as the T-005 CI
+      # pipeline. A failing gate blocks release production (ADR-025 §3).
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Static analysis (go vet)
+        run: go vet ./...
+
+      - name: Formatting check (gofmt)
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run the standard's test suite
+        run: go test -race -count=1 ./...
+
+      - name: Validate source manifest
+        run: bash scripts/validate-manifest.sh
+
+      # RELEASE_SIGNING_KEY is optional: when the secret is set, release.sh
+      # signs with the stable key; when empty, a release-time key is used.
+      # RELEASE_TAG is the validated workflow output (anchored regex above).
+      - name: Produce and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: bash scripts/release.sh --tag "$RELEASE_TAG" --out dist --publish
+
+      # STABLE releases only: publish the derived index document to main
+      # (add-only; retryable push). Pre-release/test releases NEVER touch
+      # registry/index/ — the stable version namespace stays clean.
+      - name: Publish registry index document
+        if: steps.version.outputs.prerelease == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ID="anvil-standard-laravel"
+          INDEX_PATH="registry/index/${ID}/${VERSION}.json"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -b publish-index origin/main
+
+          mkdir -p "registry/index/${ID}"
+          cp "dist/registry-metadata-${VERSION}.json" "${INDEX_PATH}"
+          git add "${INDEX_PATH}"
+          git commit -m "chore(registry): publish ${ID} ${VERSION} index document"
+          # Retryable push: rebase onto origin/main first so concurrent
+          # index publications (independent per standard repo) never
+          # clobber each other. push_ok tracks success so a double failure
+          # fails the step loudly instead of silently succeeding.
+          push_ok=0
+          for attempt in 1 2; do
+            if git push origin HEAD:main; then
+              push_ok=1
+              break
+            fi
+            if [ "$attempt" -eq 1 ]; then
+              git pull --rebase origin main
+            fi
+          done
+          if [ "$push_ok" != "1" ]; then
+            echo "::error::failed to publish the registry index document to main (${INDEX_PATH}); the GitHub release was created, but the index was not updated — resolve the push failure and re-run this step"
+            exit 1
+          fi
+
+          echo "index document published: ${INDEX_PATH}"
+          echo "discover with: anvil standard list --index <checkout of this repository>"

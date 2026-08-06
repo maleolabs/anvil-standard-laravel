@@ -76,6 +76,26 @@ repository's CI pipeline ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 release candidates are produced only from a green integration branch (the
 release publication pipeline itself is TS-016-03-02 scope).
 
+## Releases
+
+Versioned releases are produced and published from this repository alone —
+a standard release never requires a Core release (ADR-025 §3.5, §4.7). A
+tag `v<version>` on `main` triggers the release pipeline
+([`.github/workflows/release.yml`](.github/workflows/release.yml)): it runs
+the CI green gate, builds the standard executable for the release platforms,
+packages the release archive, derives and signs the registry metadata
+document (real content digests + Ed25519 publisher attestation, ADR-022),
+and publishes the GitHub Release with the registry metadata document. Each
+release declares the contract version it targets and its framework-version
+support scope, and is discoverable/installable through the registry flow
+(`anvil standard list|inspect|install`).
+
+The version line lives in the manifest `version` field. Releases are cut
+from `main`: merge `develop` into `main`, then tag and push `v<version>`.
+Tags with a `-test`/`-pre` suffix create GitHub pre-releases (e.g.
+`v1.1.0-test`). Full mechanics, trust model, and the local pipeline
+(`scripts/release.sh`) are documented in [docs/release.md](docs/release.md).
+
 ## Versioning and compatibility
 
 This standard versions independently from the Core runtime (ADR-021 §3.4).
