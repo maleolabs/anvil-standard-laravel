@@ -18,15 +18,16 @@
 #      support scope, registry-metadata.schema.json).
 #
 # What this deliberately does NOT validate (registry parseability):
-#   The source manifest intentionally carries authoring-time fields only.
-#   distribution, lifecycle and trust are RELEASE-TIME fields populated by
-#   the standard's release pipeline at publication (ADR-030, TS-016-03-02);
-#   the source manifest's trust values are format-valid placeholders. The
-#   source manifest is therefore NOT a valid registry metadata document for
-#   the Core registry client's strict parser (registry-metadata.schema.json,
-#   which requires distribution, lifecycle and trust) — do not run it
-#   through the registry parser. This script checks internal consistency
-#   only, so CI stays green on the source manifest.
+#   The source manifest carries the release-time fields — distribution,
+#   lifecycle and trust — as format-valid PLACEHOLDERS (zero content
+#   digests, dummy attestation), to be replaced with real values at
+#   publication by the standard's release pipeline (ADR-030, TS-016-03-02).
+#   Until then the source manifest is NOT a publishable registry metadata
+#   document for the Core registry client's strict parser
+#   (registry-metadata.schema.json, which requires distribution, lifecycle
+#   and trust) — do not run it through the registry parser. This script
+#   checks internal consistency only, so CI stays green on the source
+#   manifest.
 #
 # Mirrors the pattern of the Core repository's
 # scripts/validate-contract-version.sh: self-contained bash, [OK]/[FAIL]
@@ -134,21 +135,26 @@ run_checks() {
     fi
 
     # ── capability.frameworkVersion ────────────────────────────────
-    framework_count="$(jq -r '.capability.frameworkVersion | length' <<<"${json}" 2>/dev/null || true)"
-    if [ -z "${framework_count}" ] || [ "${framework_count}" = "0" ] || ! is_positive_int "${framework_count}"; then
-        f "capability.frameworkVersion must be a non-empty array (declared framework-version support scope)"
+    fv_type="$(jq -r '.capability.frameworkVersion | type' <<<"${json}" 2>/dev/null || true)"
+    if [ -z "${fv_type}" ] || [ "${fv_type}" != "array" ]; then
+        f "capability.frameworkVersion must be an array (declared framework-version support scope); got: '${fv_type:-<missing>}'"
     else
-        dupes="$(jq -r '.capability.frameworkVersion | group_by(.)[] | select(length > 1) | .[0]' <<<"${json}" | tr '\n' ' ')"
-        if [ -n "${dupes}" ]; then
-            f "capability.frameworkVersion contains duplicate entries: ${dupes}"
-        fi
-        bad="$(jq -r '.capability.frameworkVersion[]' <<<"${json}" | while read -r v; do
-            is_semver "${v}" || printf '%s\n' "${v}"
-        done | tr '\n' ' ')"
-        if [ -n "${bad}" ]; then
-            f "capability.frameworkVersion entries are not well-formed semver: ${bad}"
+        framework_count="$(jq -r '.capability.frameworkVersion | length' <<<"${json}")"
+        if [ "${framework_count}" = "0" ]; then
+            f "capability.frameworkVersion must be a non-empty array (declared framework-version support scope)"
         else
-            o "capability.frameworkVersion: ${framework_count} supported framework version(s)"
+            dupes="$(jq -r '.capability.frameworkVersion | group_by(.)[] | select(length > 1) | .[0]' <<<"${json}" | tr '\n' ' ')"
+            if [ -n "${dupes}" ]; then
+                f "capability.frameworkVersion contains duplicate entries: ${dupes}"
+            fi
+            bad="$(jq -r '.capability.frameworkVersion[]' <<<"${json}" | while read -r v; do
+                is_semver "${v}" || printf '%s\n' "${v}"
+            done | tr '\n' ' ')"
+            if [ -n "${bad}" ]; then
+                f "capability.frameworkVersion entries are not well-formed semver: ${bad}"
+            else
+                o "capability.frameworkVersion: ${framework_count} supported framework version(s)"
+            fi
         fi
     fi
 
