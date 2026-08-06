@@ -1,0 +1,112 @@
+# Release pipeline of the Laravel delivery lifecycle standard
+# (TS-016-03-02; ADR-023, ADR-030).
+#
+# Triggered by pushing a git tag matching v* (e.g. v1.0.0, v1.0.0-test).
+# Releases are cut from main (the release branch): the tag must point at a
+# commit that was promoted from develop (see docs/release.md).
+#
+# The workflow:
+#   1. extracts the version from the tag and validates it against the
+#      manifest version line (the manifest `version` field is the
+#      standard's version line);
+#   2. runs the release green gate — the same quality steps as the T-005
+#      CI pipeline (build, vet, gofmt, tests, manifest validation): a
+#      failing gate aborts the release;
+#   3. builds the standard executable for the release platforms
+#      (linux/darwin × amd64/arm64), packages the release archive, derives
+#      and signs the registry metadata document with REAL content digests
+#      and an Ed25519 publisher attestation (scripts/release.sh);
+#   4. creates the GitHub Release (stable, or pre-release for -test/-pre
+#      tags) with the artifacts + the registry metadata document;
+#   5. publishes the derived index document (registry/index/<id>/<v>.json)
+#      to main — the add-only static registry index (ADR-030; index.go
+#      layout), so the standard is discoverable through the registry flow.
+#
+# The registry metadata version is the tag version without the 'v' prefix;
+# a tag suffix (-test/-pre[.N]) marks a GitHub pre-release and is stripped
+# from the registry metadata version (plain semver only).
+#
+# Reference: TS-016-03-02, ADR-022 §3, ADR-023 §3, ADR-030 §3
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::tag '$TAG' is not a valid release tag (v<semver> or v<semver>(-test|-pre)[.N])"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+
+      # Release green gate: the same quality steps as the T-005 CI
+      # pipeline. A failing gate blocks release production (ADR-025 §3).
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Static analysis (go vet)
+        run: go vet ./...
+
+      - name: Formatting check (gofmt)
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run the standard's test suite
+        run: go test -race -count=1 ./...
+
+      - name: Validate source manifest
+        run: bash scripts/validate-manifest.sh
+
+      - name: Produce and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release.sh --tag "${{ steps.version.outputs.tag }}" --out dist --publish
+
+      - name: Publish registry index document
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.tag }}"
+          VERSION="${VERSION#v}"
+          META_VERSION="$(printf '%s' "$VERSION" | sed -E 's/-(test|pre)(\.[0-9]+)?$//')"
+          ID="anvil-standard-laravel"
+          INDEX_PATH="registry/index/${ID}/${META_VERSION}.json"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -b publish-index origin/main
+
+          mkdir -p "registry/index/${ID}"
+          cp "dist/registry-metadata-${META_VERSION}.json" "${INDEX_PATH}"
+          git add "${INDEX_PATH}"
+          git commit -m "chore(registry): publish ${ID} ${META_VERSION} index document"
+          git push origin HEAD:main
+
+          echo "index document published: ${INDEX_PATH}"
+          echo "discover with: anvil standard list --index <checkout of this repository>"
