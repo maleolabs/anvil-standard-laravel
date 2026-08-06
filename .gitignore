@@ -1,0 +1,41 @@
+# === Go ===
+
+# Binaries — compiled output from `go build`
+*.exe
+*.exe~
+*.dll
+*.dylib
+*.so
+
+# Test binaries — compiled test output
+*.test
+*.test.exe
+
+# Go workspace file (Go 1.18+)
+go.work
+go.work.sum
+
+# Vendor directory — uncomment to ignore vendored dependencies
+# vendor/
+
+# === Build Artifacts ===
+
+# Output directories
+/dist/
+/build/
+/bin/
+/out/
+/release/
+/target/
+
+# === Local tooling ===
+
+# Local builds of the standard executable
+/anvil-adapter-laravel
+/anvil-standard-laravel
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
