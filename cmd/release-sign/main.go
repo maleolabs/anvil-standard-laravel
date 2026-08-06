@@ -138,6 +138,13 @@ func runSign(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	// The manifest `version` field is the standard's version line: a
+	// release must never declare a version the repository does not
+	// (defense in depth alongside scripts/release.sh's tag assertion).
+	if err := release.ValidateVersionMatch(*version, src.Version); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
 	priv, err := release.LoadPrivateKey(*key)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -162,6 +169,13 @@ func runSign(args []string) int {
 	publicKey := release.PublicKeyBase64(priv)
 
 	doc := release.DeriveDocument(src, *version, *location, digest, signature, publicKey)
+	// Self-parse guard: never write a document the strict registry parser
+	// would reject (TS-016-03-02 review finding; the release pipeline never
+	// publishes material it cannot verify).
+	if err := release.ValidateDocumentShape(doc); err != nil {
+		fmt.Fprintf(os.Stderr, "error: derived document failed the self-parse guard: %v\n", err)
+		return 1
+	}
 	if *out == "" {
 		if err := release.WriteDocument(doc, "/dev/stdout"); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)

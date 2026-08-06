@@ -37,6 +37,13 @@
 #     declared public key; publisher origin is established by the adopter
 #     pinning that key out of band (trust anchors allowlist). Every release
 #     therefore prints its public key and a ready-to-use anchors snippet.
+#     NOTE (docs/release.md Trust section): with the release-time key, an
+#     anchor copied from the release's own notes is de-facto TOFU — it pins
+#     integrity/attestation and detects channel tamper, it does NOT prove
+#     publisher origin. Use RELEASE_SIGNING_KEY for a stable key.
+#
+# Environment: bash, jq, a Go toolchain, tar, and sha256sum (GNU coreutils)
+# or shasum (macOS). base64 decoding auto-detects -d (GNU) vs -D (BSD).
 #
 # Tag convention: v<version> (plain semver) is a stable release. A suffix
 # after the version marks a GitHub PRE-RELEASE and is stripped from the
@@ -118,14 +125,39 @@ is_semver() { # <version>
     printf '%s' "$1" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
 
+# sha256sum_portable — GNU coreutils sha256sum on Linux, shasum -a 256 on
+# macOS (the release pipeline runs on both; see the environment note at the
+# top of this script).
+sha256sum_portable() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$@"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$@"
+    else
+        fail "neither sha256sum (coreutils) nor shasum (macOS) is available — GNU/Linux or macOS is required for release.sh"
+    fi
+}
+
+# base64_decode — `base64 -d` (GNU) or `base64 -D` (BSD/macOS).
+base64_decode() {
+    if printf 'eA==' | base64 -d >/dev/null 2>&1; then
+        base64 -d
+    else
+        base64 -D
+    fi
+}
+
 # normalize_tag <git-tag> — strips the 'v' prefix and any pre-release
 # suffix (-test, -pre, optionally -test.N/-pre.N); the suffix marks a
 # GitHub pre-release.
+# The pattern is FULLY-ANCHORED (^...$): a tag that carries shell
+# metacharacters or any other shape is rejected before its value is used
+# anywhere (shell, paths, release assets, commit messages).
 # Outputs (global): TAG_VERSION, META_VERSION, PRERELEASE
 normalize_tag() {
     local raw="${1#v}"
     if ! printf '%s' "${raw}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(test|pre)(\.[0-9]+)?)?$'; then
-        fail "tag '$1' is not a valid release tag (v<semver> or v<semver>(-test|-pre)[.N])"
+        fail "tag '$1' is not a valid release tag (must match ^v[0-9]+\.[0-9]+\.[0-9]+(-(test|pre)(\.[0-9]+)?)?$)"
     fi
     META_VERSION="$(printf '%s' "${raw}" | sed -E 's/-(test|pre)(\.[0-9]+)?$//')"
     TAG_VERSION="${raw}"
@@ -197,7 +229,7 @@ if [ -n "${KEY_FILE}" ]; then
     log "using signing key: ${KEY_FILE}"
 elif [ -n "${RELEASE_SIGNING_KEY:-}" ]; then
     KEY_FILE="${KEY_DIR}/release-signing-key.pem"
-    printf '%s' "${RELEASE_SIGNING_KEY}" | base64 -d > "${KEY_FILE}"
+    printf '%s' "${RELEASE_SIGNING_KEY}" | base64_decode > "${KEY_FILE}"
     chmod 600 "${KEY_FILE}"
     log "using signing key from RELEASE_SIGNING_KEY"
 else
@@ -231,7 +263,7 @@ log "self-verification: PASS"
 # ── Checksums + trust anchors snippet ──────────────────────────────
 (
     cd "${OUT_DIR}"
-    sha256sum "${ARCHIVE_NAME}" "registry-metadata-${META_VERSION}.json" \
+    sha256sum_portable "${ARCHIVE_NAME}" "registry-metadata-${META_VERSION}.json" \
         binaries/* > SHA256SUMS.txt
 )
 log "checksums: ${OUT_DIR}/SHA256SUMS.txt"
