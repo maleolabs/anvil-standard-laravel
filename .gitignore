@@ -34,6 +34,10 @@ go.work.sum
 /anvil-adapter-laravel
 /anvil-standard-laravel
 
+# Release signing keys (release-time keys are generated per release; never
+# commit private key material)
+*.pem
+
 # Editor / OS noise
 .DS_Store
 *.swp

@@ -185,6 +185,8 @@ func VerifyAttestation(doc *MetadataDocument) error {
 // adoption-time checks of the Core registry client (VerifyTrust,
 // internal/registry/trust.go):
 //
+//  0. shape — the document must satisfy the strict-parser format surface
+//     (ValidateDocumentShape, the self-parse guard);
 //  1. integrity — every declared content digest must equal the recomputed
 //     SHA-256 of the release content (all-match semantics);
 //  2. attestation — the Ed25519 signature verifies over the canonical
@@ -195,6 +197,9 @@ func VerifyAttestation(doc *MetadataDocument) error {
 // self-consistent and signed by the holder of the declared key; establishing
 // publisher origin is the adopter's anchor allowlist (PM decision D-07).
 func VerifyDocument(doc *MetadataDocument, content []byte) error {
+	if err := ValidateDocumentShape(doc); err != nil {
+		return err
+	}
 	if len(doc.Trust.ContentDigests) == 0 {
 		return errors.New("the release declares no content digests; a release without integrity material cannot be verified (ADR-022 §3)")
 	}

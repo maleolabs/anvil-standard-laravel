@@ -49,37 +49,45 @@ git push origin v1.1.0
 
 The workflow then:
 
-1. **Green gate** — runs the same quality steps as the T-005 CI pipeline
+1. **Tag validation** — the tag arrives via the workflow environment and is
+   validated against a fully-anchored pattern before it is used anywhere;
+   a **stable tag must point at a commit on `main`** (asserted with
+   `git merge-base --is-ancestor` after fetching `origin/main`); test /
+   pre-release tags are exempt from the main check (they may come from any
+   branch).
+2. **Green gate** — runs the same quality steps as the T-005 CI pipeline
    (`go build ./...`, `go vet ./...`, `gofmt`, `go test -race -count=1
    ./...`, `scripts/validate-manifest.sh`). A failing gate aborts the
    release.
-2. **Build** — the standard executable for the release platforms
+3. **Build** — the standard executable for the release platforms
    (linux/darwin × amd64/arm64, `CGO_ENABLED=0`).
-3. **Package** — the release archive
+4. **Package** — the release archive
    `anvil-standard-laravel-<version>.tar.gz`: the platform binaries plus
    the standard content (source manifest, manifest documentation, lifecycle
    definition, verification, templates, compatibility, docs, license). The
    archive is the release content resolved from
    `distribution.location` at adoption.
-4. **Derive + sign** — the publishable registry metadata document is
+5. **Derive + sign** — the publishable registry metadata document is
    derived from the source manifest (identity, contract version, capability
    carried over) with the release-time fields populated from the real
    release: `distribution` (github-releases, https), `lifecycle`
    (`published`), and `trust` with the **real SHA-256 content digest** of
    the archive and an **Ed25519 publisher attestation** over the canonical
    payload (see Trust below). The source manifest's placeholder trust
-   values are never shipped.
-5. **Self-verify** — the pipeline verifies its own output (integrity +
-   attestation) before publishing; it never publishes material it cannot
-   verify.
+   values are never shipped; the derived document is run through the
+   pipeline's self-parse guard (the strict-parser format surface) and
+   self-verified (integrity + attestation) before publishing.
 6. **Publish** — creates the GitHub Release with the archive, the registry
    metadata document, `SHA256SUMS.txt`, and the platform binaries; the
    release notes carry the attestation public key and a ready-to-use trust
    anchors snippet.
-7. **Index** — commits the registry metadata document to
-   `registry/index/anvil-standard-laravel/<version>.json` on `main`: the
-   add-only static index (ADR-030; the `anvil` registry client's index
-   layout), so a checkout of this repository is the static registry index.
+7. **Index (stable releases only)** — commits the registry metadata
+   document to `registry/index/anvil-standard-laravel/<version>.json` on
+   `main`: the add-only static index (ADR-030; the `anvil` registry
+   client's index layout), so a checkout of this repository is the static
+   registry index. **Pre-release/test releases never touch the index** —
+   they create the GitHub pre-release with assets only, keeping the stable
+   version namespace clean.
 
 ### Test / pre-release tags
 
@@ -94,9 +102,12 @@ git push origin v1.1.0-test
 
 The GitHub release is created with the pre-release flag and its title is
 labeled `(TEST / pre-release)`. The registry metadata version is `1.1.0`.
-A test release of version X.Y.Z must not be followed by a stable release of
-the same X.Y.Z — bump the version (the index document is add-only per
-release version).
+Pre-release tags may come from any branch (the main-ancestor check applies
+to stable tags only) and **never touch the static index** on `main` — the
+index document is published for stable releases only. Because the index is
+add-only per release version, a test release of version X.Y.Z should not be
+followed by a stable release of the same X.Y.Z (bump the version, or remove
+the test index document if one was ever published for that version).
 
 ## Artifact set
 
@@ -124,14 +135,48 @@ release version).
   — the exact composition the Anvil Runtime registry client verifies
   byte-for-byte (Core `internal/registry/trust.go`; PM decision D-01) —
   plus the publisher's base64 verification public key.
-- **Signing key.** The default is a **release-time key**: a fresh Ed25519
-  key pair is generated for every release (no secret management; the
-  private key never leaves the release pipeline). The attestation proves
-  the release was signed by the holder of the declared public key;
-  **publisher origin is established by the adopter pinning that key out of
-  band** (trust anchors allowlist, PM decision D-07 — there is no
-  first-use acceptance). Operators pin the key from the release notes or
-  `trust-anchors.snippet.json`:
+- **What the attestation actually guarantees.** The Ed25519 signature
+  proves the release was signed by the holder of the declared public key
+  and that the declared claims (id, version, content digests) are bound
+  together. With the default **release-time key** (a fresh key pair
+  generated for every release, no secrets in CI), the key itself is NOT a
+  publisher identity: anyone can generate a key pair and sign a release.
+  Origin is established only by the out-of-band trust anchor allowlist
+  (PM decision D-07 — there is no privileged path and no automatic
+  first-use acceptance in the registry client).
+- **Honest note on anchor management (release-time key).** The registry
+  client's anchor check has no TOFU, but an OPERATOR who copies the public
+  key from the release's own notes (or `trust-anchors.snippet.json`
+  attached to the release) into the anchors file is practicing
+  **de-facto TOFU**: the anchor then pins content integrity and
+  attestation — it detects tampering in the release channel after first
+  contact — but it does **not** prove publisher origin, because the key
+  was obtained from the very artifact being trusted. Operators who
+  require origin guarantees must distribute the anchor **out of band**
+  (organization key distribution, signed announcements, ceremonies) and
+  must not re-pin silently from release notes. Because the key changes
+  every release, the anchor must be updated per release — verify each new
+  key out of band before pinning.
+- **Stable signing key (recommended for production).** Set the
+  `RELEASE_SIGNING_KEY` repository secret (base64 PEM PKCS#8 Ed25519
+  private key) in the standard repository's GitHub settings, or pass
+  `--key <file>` locally. The pipeline then signs every release with the
+  same key: the trust anchor stays stable across releases, and the
+  out-of-band pinning ceremony happens once. Generate a key pair locally
+  with:
+
+  ```sh
+  go run ./cmd/release-sign generate --out ./keys
+  # set the secret: gh secret set RELEASE_SIGNING_KEY < ./keys/release-signing-key.pem
+  # (the secret value is the base64 encoding of the PEM file)
+  base64 -w0 ./keys/release-signing-key.pem | gh secret set RELEASE_SIGNING_KEY -R maleolabs/anvil-standard-laravel
+  ```
+
+  The workflow passes `RELEASE_SIGNING_KEY` to the pipeline; when the
+  secret is unset, the release-time key path above is used.
+
+  Anchors file shape (one entry per publisher; the standard id is the
+  publisher identity):
 
   ```json
   {
@@ -140,12 +185,6 @@ release version).
     }
   }
   ```
-
-  Because the key is release-time, the anchor must be updated for each
-  release after out-of-band verification of the new key. A stable signing
-  key can be supplied instead via `--key <file>` or the
-  `RELEASE_SIGNING_KEY` environment variable (base64 PEM) — then the
-  anchor stays stable across releases.
 
 ## Local release production
 

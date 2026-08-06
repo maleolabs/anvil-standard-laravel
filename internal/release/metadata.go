@@ -121,6 +121,16 @@ const (
 	// (lowercase hex).
 	DigestEncodingBase16 = "base16"
 
+	// DigestEncodingBase32 is the RFC-4648 base32 digest encoding
+	// (supported by the registry format; the release pipeline produces
+	// base16 only).
+	DigestEncodingBase32 = "base32"
+
+	// DigestEncodingBase64 is the RFC-4648 standard (padded) base64 digest
+	// encoding (supported by the registry format; the release pipeline
+	// produces base16 only).
+	DigestEncodingBase64 = "base64"
+
 	// AttestationAlgorithmEd25519 is the trust-baseline attestation
 	// algorithm (PM decision D-01).
 	AttestationAlgorithmEd25519 = "ed25519"
