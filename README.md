@@ -54,6 +54,48 @@ The binary answers the standard command contract commands: `capabilities`,
 go test ./...
 ```
 
+## CI
+
+Every push and pull request against `develop` and `main` runs the
+repository's CI pipeline ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+
+1. builds the standard executable (`go build -o anvil-adapter-laravel ./cmd/laravel-adapter`);
+2. runs the standard's test suite (`go test -race -count=1 ./...`), gated by
+   `go build ./...`, `go vet ./...`, and a `gofmt` check;
+3. validates the source manifest (`manifest/registry-metadata.json`) for
+   internal consistency via [`scripts/validate-manifest.sh`](scripts/validate-manifest.sh):
+   the manifest must parse as JSON and the declared contract version
+   (`contractVersion`) must be well-formed semver. Registry parseability is
+   deliberately out of scope for the source manifest — the release-time
+   fields (`distribution`, `lifecycle`, `trust`) are populated at publication
+   by the release pipeline (TS-016-03-02), which is why the source manifest
+   is not a strict-parser registry document by design.
+
+**Release gate.** A failing pipeline blocks release production: `develop` and
+`main` are protected branches that require this CI to pass before merge, and
+release candidates are produced only from a green integration branch (the
+release publication pipeline itself is TS-016-03-02 scope).
+
+## Releases
+
+Versioned releases are produced and published from this repository alone —
+a standard release never requires a Core release (ADR-025 §3.5, §4.7). A
+tag `v<version>` on `main` triggers the release pipeline
+([`.github/workflows/release.yml`](.github/workflows/release.yml)): it runs
+the CI green gate, builds the standard executable for the release platforms,
+packages the release archive, derives and signs the registry metadata
+document (real content digests + Ed25519 publisher attestation, ADR-022),
+and publishes the GitHub Release with the registry metadata document. Each
+release declares the contract version it targets and its framework-version
+support scope, and is discoverable/installable through the registry flow
+(`anvil standard list|inspect|install`).
+
+The version line lives in the manifest `version` field. Releases are cut
+from `main`: merge `develop` into `main`, then tag and push `v<version>`.
+Tags with a `-test`/`-pre` suffix create GitHub pre-releases (e.g.
+`v1.1.0-test`). Full mechanics, trust model, and the local pipeline
+(`scripts/release.sh`) are documented in [docs/release.md](docs/release.md).
+
 ## Versioning and compatibility
 
 This standard versions independently from the Core runtime (ADR-021 §3.4).
