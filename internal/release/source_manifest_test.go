@@ -83,12 +83,31 @@ func TestSourceManifest_DeclaresFrameworkSupportScope(t *testing.T) {
 // release-time fields (version, distribution, lifecycle, trust) are
 // populated by the release. The derived document must also pass the
 // pipeline's self-parse guard.
+//
+// The trust material follows the TS-014-04-04 shape: the full
+// attestation-bound digest set — the unnamed release-archive digest plus
+// the named digest of a release binary asset (placeholder canonical
+// base16 SHA-256 values, distinct per entry).
 func TestSourceManifest_DerivedDocumentPreservesDeclarations(t *testing.T) {
 	src := loadSourceManifest(t)
 
+	contentDigests := []ContentDigest{
+		{ // the release archive digest (unnamed, ADR-022 §3)
+			Algorithm: DigestAlgorithmSHA256,
+			Encoding:  DigestEncodingBase16,
+			Digest:    strings.Repeat("a", 64),
+		},
+		{ // a named binary asset digest (TS-014-04-04)
+			Algorithm: DigestAlgorithmSHA256,
+			Encoding:  DigestEncodingBase16,
+			Digest:    strings.Repeat("b", 64),
+			Name:      "anvil-adapter-laravel-linux-amd64",
+		},
+	}
+
 	doc := DeriveDocument(src, src.Version,
 		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v"+src.Version+"/anvil-standard-laravel-"+src.Version+".tar.gz",
-		strings.Repeat("a", 64), // canonical base16 SHA-256 placeholder
+		contentDigests,
 		strings.Repeat("A", 86)+"==",
 		strings.Repeat("A", 43)+"=",
 	)
@@ -104,6 +123,9 @@ func TestSourceManifest_DerivedDocumentPreservesDeclarations(t *testing.T) {
 	}
 	if doc.Version != src.Version {
 		t.Errorf("derived version = %q, want the source manifest version %q (the version line)", doc.Version, src.Version)
+	}
+	if !reflect.DeepEqual(doc.Trust.ContentDigests, contentDigests) {
+		t.Errorf("derived contentDigests = %v, want the declared digest set %v (archive + named binary, TS-014-04-04)", doc.Trust.ContentDigests, contentDigests)
 	}
 	if err := ValidateDocumentShape(doc); err != nil {
 		t.Errorf("derived document rejected by the self-parse guard: %v", err)
