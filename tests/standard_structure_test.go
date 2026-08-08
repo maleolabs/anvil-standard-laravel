@@ -52,6 +52,11 @@ var semverPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1
 // version of the registry metadata format itself is 1.0.0.
 const registryMetadataSchemaURN = "urn:anvil:spec:registry-metadata:1.0.0"
 
+// emailPattern matches a maintainer contact email address
+// (local-part@domain, simple form) in the MANIFEST.md Maintainership
+// section.
+var emailPattern = regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+
 // standardID is this standard's identity (registry-metadata.json `id`).
 const standardID = "anvil-standard-laravel"
 
@@ -150,8 +155,13 @@ func TestManifestDeclaresIdentity(t *testing.T) {
 func TestContractVersionConformanceTarget(t *testing.T) {
 	m := readManifest(t)
 
-	major := m.ContractVersion[:strings.Index(m.ContractVersion, ".")]
-	if major == "" || major == "0" {
+	i := strings.Index(m.ContractVersion, ".")
+	if i <= 0 {
+		t.Errorf("contractVersion = %q, want semver with major >= 1 (contract majors start at 1, ADR-024 §3.1)", m.ContractVersion)
+		return
+	}
+	major := m.ContractVersion[:i]
+	if major == "0" {
 		t.Errorf("contractVersion = %q, want semver with major >= 1 (contract majors start at 1, ADR-024 §3.1)", m.ContractVersion)
 	}
 }
@@ -161,7 +171,10 @@ func TestContractVersionConformanceTarget(t *testing.T) {
 // parts of the standard must not drift. Compatibility with the runtime is
 // negotiated at adoption from the declared contract version (ADR-021
 // §3.4, 007 §8); a drift between the declaration and the compatibility
-// documentation would break that negotiation.
+// documentation would break that negotiation. The match is anchored to
+// the declaration row of the compatibility table and requires the
+// backticked form, so historical prose mentions of the version string
+// cannot keep the guard green.
 func TestManifestContractVersionMatchesCompatibility(t *testing.T) {
 	m := readManifest(t)
 
@@ -169,8 +182,9 @@ func TestManifestContractVersionMatchesCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read compatibility declaration: %v", err)
 	}
-	if !regexp.MustCompile(`\Q` + m.ContractVersion + `\E`).Match(compat) {
-		t.Errorf("compatibility part does not reference the manifest's declared contract version %q", m.ContractVersion)
+	declarationRow := regexp.MustCompile(`(?m)^\|\s*\*\*Target contract version\*\*\s*\|[^|]*\Q` + m.ContractVersion + `\E[^|]*\|`)
+	if !declarationRow.Match(compat) {
+		t.Errorf("compatibility part does not declare target contract version %q in the compatibility table", m.ContractVersion)
 	}
 }
 
@@ -192,12 +206,35 @@ func TestManifestHumanFormAgreesWithMachineForm(t *testing.T) {
 	if !strings.Contains(text, "`"+m.ID+"`") {
 		t.Errorf("MANIFEST.md does not declare the standard id %q", m.ID)
 	}
-	if !strings.Contains(text, m.ContractVersion) {
-		t.Errorf("MANIFEST.md does not declare the target contract version %q", m.ContractVersion)
+	if !strings.Contains(text, "`"+m.ContractVersion+"`") {
+		t.Errorf("MANIFEST.md does not declare the target contract version %q in backticked form", m.ContractVersion)
 	}
 	for _, v := range m.Capability.FrameworkVersion {
 		if !strings.Contains(text, "`"+v+"`") {
 			t.Errorf("MANIFEST.md does not declare supported framework version %q", v)
 		}
+	}
+}
+
+// TestManifestDeclaresMaintainership verifies the human-readable Manifest
+// part declares the maintainership bar of ADR-027 §3: a maintainer
+// declared and accountable. The declaration lives in the MANIFEST.md
+// Maintainership section; deleting the section (or dropping the
+// accountable maintainer) fails this test.
+func TestManifestDeclaresMaintainership(t *testing.T) {
+	human, err := os.ReadFile(filepath.Join(repoRoot(t), "MANIFEST.md"))
+	if err != nil {
+		t.Fatalf("read MANIFEST.md: %v", err)
+	}
+	text := string(human)
+
+	if !strings.Contains(text, "## Maintainership") {
+		t.Error("MANIFEST.md has no '## Maintainership' section (ADR-027 §3 maintainership bar)")
+	}
+	if !strings.Contains(text, "**Accountable maintainer**") {
+		t.Error("MANIFEST.md has no '**Accountable maintainer**' field (maintainer must be declared and accountable)")
+	}
+	if !emailPattern.MatchString(text) {
+		t.Error("MANIFEST.md declares no maintainer contact email")
 	}
 }
