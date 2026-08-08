@@ -104,6 +104,22 @@ attestation over the release artifact) is populated by the standard's
 release pipeline at publication (ADR-030, TS-016-03-02) — the values in
 the source manifest are format-valid placeholders.
 
+## Maintainership
+
+The standard is owned by its maintainers, not by Core (ADR-027 §3,
+Transition Plan §4.3): Core governs the specification and the registry
+contract; maintainers own the content — structure, tests, conformance,
+and this declaration are the maintainer's accountability, and a standard
+that violates the specification's contracts is rejected by the registry,
+not patched by Core.
+
+| Field | Value |
+|---|---|
+| **Maintainer organization** | Maleo Labs Engineering (`engineering@maleolabs.com`) |
+| **Accountable maintainer** | Marij Mokoginta (`marijmokoginta04@gmail.com`) |
+| **Accountability scope** | All seven parts of the standard structure (ADR-021 §3.2): lifecycle content, verification rules, templates, compatibility declarations, documentation, and the standard's own tests; the declared contract version and framework-version support scope; release quality per release-time declaration (ADR-022, ADR-030) |
+| **Maintainer duties** | Keep the standard conformant with the declared contract version (`1.0.0`) and re-verify template/config freshness against the declared framework-version support scope before releasing (compatibility part, Template freshness); respond to registry acceptance findings; govern deprecation per ADR-027 §3 (no silent removal) |
+
 ## Versioning
 
 The standard versions independently from the Core runtime (ADR-021 §3.4):
