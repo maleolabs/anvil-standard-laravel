@@ -79,7 +79,7 @@ anvil server project register \
   --adapter laravel \
   --non-interactive
 
-# 5. Install the artifact as a Release (runs the 12 Laravel verification checks)
+# 5. Install the artifact as a Release (runs the 8 structural Laravel verification checks; the 4 lifecycle-conformity checks run at the post-activation verify stage — command-contract §4.2)
 anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 
 # 6. Activate the Release (runs Laravel activation phases)
