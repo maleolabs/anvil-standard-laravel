@@ -22,7 +22,7 @@ command contract (command-contract.md, specification corpus) with the
 following declaration (`capabilities` command):
 
 - **Activation phases:** `migrate`, `config_cache`, `route_cache`,
-  `event_cache`
+  `event_cache`, `queue_restart`
 - **Build phases:** `composer`, `npm`, `config_cache`, `route_cache`,
   `view_cache`
 - **Verification checks:** `vendor_present`, `bootstrap_structure`,

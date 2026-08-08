@@ -23,7 +23,7 @@ grouped and ordered by group: **migration → cache warming → queue**:
 
 | # | Group | Phase | Command | Reversible |
 |---|---|---|---|---|
-| 1 | migration | `migrate` | `php artisan migrate --force` | ✅ rollback: `php artisan migrate:rollback` |
+| 1 | migration | `migrate` | `php artisan migrate --force` | ✅ rollback: `php artisan migrate:rollback --force` |
 | 2 | cache warming | `config_cache` | `php artisan config:cache` | ❌ irreversible |
 | 3 | cache warming | `route_cache` | `php artisan route:cache` | ❌ irreversible |
 | 4 | cache warming | `event_cache` | `php artisan event:cache` | ❌ irreversible |
@@ -90,7 +90,7 @@ rollback**:
 
 | Phase | Rollback behavior |
 |---|---|
-| `migrate` | Runs `php artisan migrate:rollback` — reverses the migration batch applied by the activation. |
+| `migrate` | Runs `php artisan migrate:rollback --force` — reverses the migration batch applied by the activation. The `--force` flag is mandatory for this standard's execution model: Laravel's `RollbackCommand` uses `ConfirmableTrait` and prompts for confirmation when `APP_ENV=production`; the adapter and the orchestrator run artisan as **non-interactive** subprocesses, where the default confirmation answer is "no" — without `--force` the rollback would be cancelled ("Command cancelled", exit 1) in production, the standard's primary environment. The flag mirrors `migrate --force` on the activation side. |
 | `config_cache` / `route_cache` / `event_cache` | Irreversible — no command executed; the adapter reports an informational success documenting that the cache cannot be undone. The restored release's own activation regenerates its caches from its code. |
 | `queue_restart` | Irreversible — no command executed; the adapter reports an informational success documenting that the restart signal cannot be un-sent. The restored release's own activation re-signals its workers. |
 
@@ -109,7 +109,7 @@ orchestrator during release activation and rollback:
   `php artisan config:cache`, `php artisan route:cache`,
   `php artisan view:cache`, `php artisan queue:restart` (in execution
   order)
-- **Rollback commands:** `php artisan migrate:rollback`
+- **Rollback commands:** `php artisan migrate:rollback --force`
 
 The manifest metadata surface carries `view:cache` in the activation
 command list (TS-P7-15 AC-3) — the metadata form differs from the

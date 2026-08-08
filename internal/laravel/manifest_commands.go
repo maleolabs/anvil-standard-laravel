@@ -39,9 +39,16 @@ func ActivationCommands() []string {
 // order. The full command string is stored in the artifact manifest per
 // ADR-017 and executed by the orchestrator during release rollback.
 //
+// The migrate rollback runs force-confirmed (`--force`), mirroring the
+// executable rollback phase (activation.go): Laravel's RollbackCommand
+// uses ConfirmableTrait and would prompt for confirmation in production —
+// the orchestrator executes these strings as non-interactive subprocesses,
+// where the default confirmation answer is "no" and the rollback would be
+// cancelled.
+//
 // Reference: TS-P7-16 AC-1..AC-3, ADR-017
 func RollbackCommands() []string {
 	return []string{
-		"php artisan migrate:rollback",
+		"php artisan migrate:rollback --force",
 	}
 }

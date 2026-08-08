@@ -26,7 +26,7 @@ php artisan queue:restart
 **Rollback commands:**
 
 ```text
-php artisan migrate:rollback
+php artisan migrate:rollback --force
 ```
 
 ## Current wiring status — read this before relying on the fields

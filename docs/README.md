@@ -18,7 +18,7 @@ The Laravel adapter gives Anvil Laravel-specific behavior for building, packagin
 | **Build pipeline** | Composer → npm → artisan cache commands as the default `.anvil/pipelines/build.yaml` ([build.md](build.md)) |
 | **Verification** | 8 Laravel structure checks that must pass before an artifact is installed on a server ([verify.md](verify.md)) |
 | **Activation** | `php artisan migrate --force`, `config:cache`, `route:cache`, `event:cache`, `queue:restart` on release activate — migrations post-promotion, cache warming first, worker recycling last ([deploy.md](deploy.md), [Lifecycle Definition](../lifecycle/definition.md)) |
-| **Rollback** | `php artisan migrate:rollback` on release rollback; cache and queue phases are irreversible and never block rollback ([deploy.md](deploy.md)) |
+| **Rollback** | `php artisan migrate:rollback --force` on release rollback; cache and queue phases are irreversible and never block rollback ([deploy.md](deploy.md)) |
 | **Manifest metadata** | Activation/rollback command strings for the artifact manifest (ADR-017) ([manifest.md](manifest.md)) |
 | **Config extension** | Reserved `framework.laravel.*` configuration keys ([config.md](config.md)) |
 

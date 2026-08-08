@@ -85,16 +85,40 @@ func TestActivationCommands_OrderMatchesPhaseTable(t *testing.T) {
 }
 
 // TestRollbackCommands_Exact verifies that RollbackCommands returns
-// exactly the migrate:rollback command as a string array (TS-P7-16
-// AC-1, AC-3).
+// exactly the force-confirmed migrate rollback command as a string array
+// (TS-P7-16 AC-1, AC-3). The `--force` flag mirrors the executable
+// rollback phase (activation.go): Laravel's RollbackCommand uses
+// ConfirmableTrait, and the orchestrator executes manifest commands as
+// non-interactive subprocesses where the default confirmation answer is
+// "no" — without --force the rollback would be cancelled in production.
 func TestRollbackCommands_Exact(t *testing.T) {
 	want := []string{
-		"php artisan migrate:rollback",
+		"php artisan migrate:rollback --force",
 	}
 
 	got := RollbackCommands()
 
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("RollbackCommands() = %v, want %v", got, want)
+	}
+}
+
+// TestRollbackCommands_MatchesPhaseTable verifies that the manifest
+// rollback command stays consistent with the executable rollback phase
+// (activation.go): the manifest string is the `php artisan <args>` form
+// of the migrate phase's rollbackArgs. Both surfaces must carry the same
+// force-confirmed command — the orchestrator executes the manifest form,
+// the adapter the phase-table form, and a divergence would mean rollback
+// behaves differently depending on the execution path.
+func TestRollbackCommands_MatchesPhaseTable(t *testing.T) {
+	p, ok := lookupPhase(PhaseMigrate)
+	if !ok {
+		t.Fatalf("phase %q missing from phase table", PhaseMigrate)
+	}
+	want := "php artisan " + strings.Join(p.rollbackArgs, " ")
+
+	got := RollbackCommands()
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("RollbackCommands() = %v, want [%q] derived from the migrate phase rollback args %v", got, want, p.rollbackArgs)
 	}
 }

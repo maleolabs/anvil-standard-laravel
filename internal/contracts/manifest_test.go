@@ -18,7 +18,7 @@ import (
 func TestManifestCommandResult_RoundTrip(t *testing.T) {
 	in := ManifestCommandResult{
 		ActivationCommands: []string{"php artisan migrate --force", "php artisan config:cache"},
-		RollbackCommands:   []string{"php artisan migrate:rollback"},
+		RollbackCommands:   []string{"php artisan migrate:rollback --force"},
 	}
 	roundTrip(t, in)
 }
@@ -31,7 +31,7 @@ func TestManifestCommandResult_RoundTrip(t *testing.T) {
 func TestManifestCommandResult_JSONFieldNames(t *testing.T) {
 	in := ManifestCommandResult{
 		ActivationCommands: []string{"php artisan migrate --force"},
-		RollbackCommands:   []string{"php artisan migrate:rollback"},
+		RollbackCommands:   []string{"php artisan migrate:rollback --force"},
 	}
 	data := roundTrip(t, in)
 	m := jsonKeys(t, data)

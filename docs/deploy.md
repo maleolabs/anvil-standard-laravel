@@ -56,7 +56,7 @@ The artifact is extracted into the release directory (shared links applied), the
 
 | Order | Group | Phase | Command | Reversible? |
 |---|---|---|---|---|
-| 1 | migration | `migrate` | `php artisan migrate --force` | Reversible (`migrate:rollback`) |
+| 1 | migration | `migrate` | `php artisan migrate --force` | Reversible (`migrate:rollback --force`) |
 | 2 | cache warming | `config_cache` | `php artisan config:cache` | Irreversible |
 | 3 | cache warming | `route_cache` | `php artisan route:cache` | Irreversible |
 | 4 | cache warming | `event_cache` | `php artisan event:cache` | Irreversible |
@@ -78,7 +78,7 @@ Rollback restores the previously active release, then runs the adapter rollback 
 
 | Phase | Rollback behavior |
 |---|---|---|
-| `migrate` | `php artisan migrate:rollback` — reverses the migration batch applied by the activation |
+| `migrate` | `php artisan migrate:rollback --force` — reverses the migration batch applied by the activation. Force-confirmed because Laravel's `RollbackCommand` prompts for confirmation in production (`ConfirmableTrait`) and the adapter runs artisan non-interactively — without `--force` the rollback would be cancelled |
 | `config_cache` / `route_cache` / `event_cache` | **Irreversible** — a rollback cannot undo a cache. The adapter reports an *informational* result and the rollback proceeds without undoing these operations. The restored release's own activation regenerates its caches from its code. |
 | `queue_restart` | **Irreversible** — a rollback cannot un-send the worker restart signal. The adapter reports an *informational* result and the rollback proceeds; the restored release's own activation re-signals its workers. |
 

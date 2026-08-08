@@ -444,7 +444,7 @@ func TestRun_Manifest(t *testing.T) {
 	if !reflectEqual(result.ActivationCommands, wantActivation) {
 		t.Errorf("ActivationCommands = %v, want %v", result.ActivationCommands, wantActivation)
 	}
-	wantRollback := []string{"php artisan migrate:rollback"}
+	wantRollback := []string{"php artisan migrate:rollback --force"}
 	if !reflectEqual(result.RollbackCommands, wantRollback) {
 		t.Errorf("RollbackCommands = %v, want %v", result.RollbackCommands, wantRollback)
 	}

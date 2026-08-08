@@ -168,8 +168,12 @@ func TestRunActivation_UnknownOperation(t *testing.T) {
 }
 
 // TestRunActivation_RollbackMigrate verifies that the rollback operation
-// of the migrate phase runs `php artisan migrate:rollback` in the release
-// working directory (TS-P7-10 AC-1).
+// of the migrate phase runs `php artisan migrate:rollback --force` in the
+// release working directory (TS-P7-10 AC-1). The `--force` flag pins the
+// exact argument set: Laravel's RollbackCommand uses ConfirmableTrait and
+// prompts for confirmation in production — the adapter runs artisan as a
+// non-interactive subprocess, so without --force the rollback would always
+// be cancelled (confirm defaults to "no" without a TTY).
 func TestRunActivation_RollbackMigrate(t *testing.T) {
 	runner := &fakeRunner{output: "Rolled back: 2026_07_31_000001"}
 	workingDir := "/var/www/acme-shop/releases/rel-0"
@@ -179,8 +183,9 @@ func TestRunActivation_RollbackMigrate(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Success = false, want true (result: %#v)", result)
 	}
-	if len(runner.args) != 1 || !reflect.DeepEqual(runner.args[0], []string{"migrate:rollback"}) {
-		t.Errorf("runner args = %v, want [migrate:rollback]", runner.args)
+	wantArgs := []string{"migrate:rollback", "--force"}
+	if len(runner.args) != 1 || !reflect.DeepEqual(runner.args[0], wantArgs) {
+		t.Errorf("runner args = %v, want %v", runner.args, wantArgs)
 	}
 	if runner.dirs[0] != workingDir {
 		t.Errorf("runner working dir = %q, want %q", runner.dirs[0], workingDir)
@@ -188,9 +193,9 @@ func TestRunActivation_RollbackMigrate(t *testing.T) {
 }
 
 // TestRunActivation_RollbackMigrateFailure verifies that a failing
-// migrate:rollback reports failure with error details.
+// migrate:rollback --force reports failure with error details.
 func TestRunActivation_RollbackMigrateFailure(t *testing.T) {
-	runner := &fakeRunner{err: fmt.Errorf("artisan migrate:rollback failed: connection refused")}
+	runner := &fakeRunner{err: fmt.Errorf("artisan migrate:rollback --force failed: connection refused")}
 	result := RunActivation(context.Background(), runner.run, request(PhaseMigrate, contracts.PhaseOperationRollback, ""))
 
 	if result.Success {
@@ -430,9 +435,11 @@ func TestActivation_RollbackSemanticsPerPhase(t *testing.T) {
 		case reversible && p.irreversible:
 			t.Errorf("phase %q declares both rollback args and irreversibility, want exactly one", p.name)
 		case reversible:
-			// The migrate phase carries the only rollback command.
-			if p.name != PhaseMigrate || !reflect.DeepEqual(p.rollbackArgs, []string{"migrate:rollback"}) {
-				t.Errorf("phase %q rollback args = %v, want the migrate:rollback command on the migrate phase only", p.name, p.rollbackArgs)
+			// The migrate phase carries the only rollback command,
+			// force-confirmed for the non-interactive production
+			// execution of the adapter.
+			if p.name != PhaseMigrate || !reflect.DeepEqual(p.rollbackArgs, []string{"migrate:rollback", "--force"}) {
+				t.Errorf("phase %q rollback args = %v, want the migrate:rollback --force command on the migrate phase only", p.name, p.rollbackArgs)
 			}
 		case !p.irreversible:
 			t.Errorf("phase %q has no rollback args and is not irreversible, want exactly one rollback semantic", p.name)
