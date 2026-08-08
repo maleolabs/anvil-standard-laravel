@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -24,20 +25,28 @@ func sha256Bytes(data []byte) []byte {
 //
 // The attestation is an Ed25519 signature over the canonical payload,
 // composed byte-for-byte exactly as the Anvil Runtime registry client
-// verifies it (Core internal/registry/trust.go: attestationPayload):
+// verifies it (Core internal/registry/trust.go: attestationPayload;
+// registry-metadata.md §4.7):
 //
 //	utf8(id) || 0x00 || utf8(version) || 0x00 ||
-//	concat(decoded digest bytes in contentDigests array order)
+//	concat(entry bytes in contentDigests array order)
 //
-// where 0x00 is a single NUL byte. Any deviation in the composition — extra
-// or missing separator, reordering, string-level construction — invalidates
-// the attestation. The signature and public key are strict RFC-4648 base64
-// (standard alphabet with padding): a 64-byte signature, a 32-byte key.
+// where 0x00 is a single NUL byte and each entry contributes its decoded
+// digest bytes, prefixed by utf8(name) || 0x00 when the entry carries a
+// name (TS-014-04-04; security review F-2 — the asset binding is SIGNED
+// material: a name can be neither stripped nor renamed across assets
+// without invalidating the attestation). Releases predating binary
+// attestation carry no named entries and compose byte-identically to the
+// pre-F-2 payload — their signatures keep verifying. Any deviation in
+// the composition — extra or missing separator, reordering, string-level
+// construction — invalidates the attestation. The signature and public
+// key are strict RFC-4648 base64 (standard alphabet with padding): a
+// 64-byte signature, a 32-byte key.
 
 // AttestationPayload composes the canonical signed payload byte-for-byte.
-// It rejects NUL bytes inside id or version: a NUL inside a claim would
-// make the composition ambiguous (the NUL is the separator), mirroring the
-// defensive check in Core trust.go.
+// It rejects NUL bytes inside id, version, or an asset name: a NUL inside
+// a claim would make the composition ambiguous (the NUL is the
+// separator), mirroring the defensive check in Core trust.go.
 func AttestationPayload(id, version string, digests []ContentDigest) ([]byte, error) {
 	if strings.Contains(id, "\x00") || strings.Contains(version, "\x00") {
 		return nil, fmt.Errorf("id or version contains a NUL byte, which the canonical payload composition uses as a separator; the schema patterns exclude it")
@@ -51,6 +60,13 @@ func AttestationPayload(id, version string, digests []ContentDigest) ([]byte, er
 		decoded, err := decodeDigest(d)
 		if err != nil {
 			return nil, fmt.Errorf("content digest entry [%d] (%s) is not verification material: %v", i, d.Encoding, err)
+		}
+		if d.Name != "" {
+			if strings.Contains(d.Name, "\x00") {
+				return nil, fmt.Errorf("content digest entry [%d] carries an asset name with a NUL byte, which the canonical payload composition uses as a separator — the schema pattern excludes it", i)
+			}
+			buf = append(buf, d.Name...)
+			buf = append(buf, 0x00)
 		}
 		buf = append(buf, decoded...)
 	}
@@ -89,6 +105,63 @@ func decodeDigest(d ContentDigest) ([]byte, error) {
 // padding) encoding of the 64-byte Ed25519 signature.
 func SignAttestation(payload []byte, priv ed25519.PrivateKey) string {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+}
+
+// Detached document signature (TS-014-04-04, security review F-1).
+//
+// The release pipeline ALSO publishes a detached Ed25519 signature over
+// the RAW bytes of the release metadata document (the exact bytes written
+// to the registry-metadata-<version>.json release asset), carried as a
+// sibling release asset "registry-metadata-<version>.json.sig". This is a
+// DISTINCT signature from the in-document canonical-payload attestation
+// (trust.attestation.signature): the attestation binds the document's
+// DECLARED claims to the digest values, while the detached signature
+// binds the document's BYTES themselves, so a consumer that cannot run
+// the full registry trust validation (the bootstrap installer,
+// install.sh) can still verify the document it reads was produced by the
+// holder of the pinned publisher key before trusting any digest inside
+// it. The signature is over the raw bytes — no canonical payload
+// composition is involved.
+//
+// The detached signature is only meaningful with a STABLE signing key:
+// a release-time key cannot be pinned out of band, so the release
+// pipeline emits the .sig asset only when a stable key is supplied
+// (RELEASE_SIGNING_KEY / --key), never for generated release-time keys
+// (scripts/release.sh; a .sig that no pinned key verifies would make the
+// installer fail closed against every release).
+
+// SignDocumentBytes signs the RAW document bytes (byte-exact: the same
+// bytes written to the release asset) with the private key and returns
+// the strict RFC-4648 base64 (standard alphabet with padding) encoding
+// of the 64-byte Ed25519 signature — the exact content of the
+// registry-metadata-<version>.json.sig release asset.
+func SignDocumentBytes(document []byte, priv ed25519.PrivateKey) string {
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, document))
+}
+
+// VerifyDocumentSignature verifies a detached signature over raw document
+// bytes with the given base64-encoded Ed25519 public key (strict
+// RFC-4648, 32 bytes). It mirrors the shape checks of VerifyAttestation
+// and is used by the pipeline's self-verification.
+func VerifyDocumentSignature(document []byte, signatureB64, publicKeyB64 string) error {
+	signature, err := base64.StdEncoding.Strict().DecodeString(signatureB64)
+	if err != nil {
+		return fmt.Errorf("the detached signature is not strict RFC-4648 base64: %v", err)
+	}
+	if len(signature) != ed25519.SignatureSize {
+		return fmt.Errorf("the detached signature decodes to %d bytes, want exactly %d bytes (Ed25519)", len(signature), ed25519.SignatureSize)
+	}
+	publicKey, err := base64.StdEncoding.Strict().DecodeString(publicKeyB64)
+	if err != nil {
+		return fmt.Errorf("the verification public key is not strict RFC-4648 base64: %v", err)
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("the verification public key decodes to %d bytes, want exactly %d bytes (Ed25519)", len(publicKey), ed25519.PublicKeySize)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), document, signature) {
+		return errors.New("the detached signature does not verify over the raw document bytes with the declared public key — the document was tampered with or was not signed by the holder of the key")
+	}
+	return nil
 }
 
 // PublicKeyBase64 returns the strict RFC-4648 base64 encoding of the
@@ -187,10 +260,13 @@ func VerifyAttestation(doc *MetadataDocument) error {
 //
 //  0. shape — the document must satisfy the strict-parser format surface
 //     (ValidateDocumentShape, the self-parse guard);
-//  1. integrity — every declared content digest must equal the recomputed
-//     SHA-256 of the release content (all-match semantics);
+//  1. integrity — every declared CONTENT digest (the entries without a
+//     name, TS-014-04-04) must equal the recomputed SHA-256 of the
+//     release content (all-match semantics); named entries are
+//     asset-bound and are verified by VerifyBinaryAssetDigests;
 //  2. attestation — the Ed25519 signature verifies over the canonical
-//     payload with the declared public key.
+//     payload (which concatenates EVERY declared digest, named entries
+//     included) with the declared public key.
 //
 // Origin (the out-of-band trust anchor) is an operator-side concern and is
 // deliberately NOT verified here: the pipeline proves the release is
@@ -200,11 +276,23 @@ func VerifyDocument(doc *MetadataDocument, content []byte) error {
 	if err := ValidateDocumentShape(doc); err != nil {
 		return err
 	}
-	if len(doc.Trust.ContentDigests) == 0 {
-		return errors.New("the release declares no content digests; a release without integrity material cannot be verified (ADR-022 §3)")
+	contentDigests := 0
+	for _, d := range doc.Trust.ContentDigests {
+		if d.Name == "" {
+			contentDigests++
+		}
+	}
+	if contentDigests == 0 {
+		return errors.New("the release declares no content digest for the release content (every trust.contentDigests entry is a named asset digest); a release without release-content integrity material cannot be verified (ADR-022 §3)")
 	}
 	sum := sha256Bytes(content)
 	for i, d := range doc.Trust.ContentDigests {
+		if d.Name != "" {
+			// Asset-bound entry: verified against its named asset by
+			// VerifyBinaryAssetDigests, not against the release content
+			// (TS-014-04-04).
+			continue
+		}
 		decoded, err := decodeDigest(d)
 		if err != nil {
 			return fmt.Errorf("content digest entry [%d] is not verification material: %v", i, err)
@@ -214,4 +302,62 @@ func VerifyDocument(doc *MetadataDocument, content []byte) error {
 		}
 	}
 	return VerifyAttestation(doc)
+}
+
+// VerifyBinaryAssetDigests verifies the binary assets of a release
+// against the document's named digest entries (TS-014-04-04), two-way
+// strict: every binary file in dir must have a declared entry that
+// matches its recomputed SHA-256, and every declared named entry must
+// have its file — the pipeline never publishes a digest without its
+// asset, and never ships an asset without its digest. A directory with
+// no files fails the release: a release that declares named entries must
+// actually carry the assets (mirrors the Core asset-install verifier
+// semantics: mismatch aborts).
+func VerifyBinaryAssetDigests(doc *MetadataDocument, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read binaries directory %s: %w", dir, err)
+	}
+	declared := make(map[string]ContentDigest)
+	for _, d := range doc.Trust.ContentDigests {
+		if d.Name != "" {
+			if _, dup := declared[d.Name]; dup {
+				return fmt.Errorf("binary asset %q is declared twice (two entries cannot bind the same asset)", d.Name)
+			}
+			declared[d.Name] = d
+		}
+	}
+
+	files := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		files++
+		name := entry.Name()
+		d, ok := declared[name]
+		if !ok {
+			return fmt.Errorf("binary asset %s has no declared digest in trust.contentDigests — every shipped binary must be attested (TS-014-04-04)", name)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read binary asset %s: %w", name, err)
+		}
+		expected, err := decodeDigest(d)
+		if err != nil {
+			return fmt.Errorf("binary asset %s: declared entry is not verification material: %v", name, err)
+		}
+		if !bytes.Equal(expected, sha256Bytes(data)) {
+			return fmt.Errorf("binary asset %s does not match its declared digest (%s %s) — the asset was tampered with or the digest is stale; aborting the release", name, d.Encoding, d.Digest)
+		}
+	}
+	if files == 0 {
+		return fmt.Errorf("binaries directory %s is empty — the release declares no binary assets to verify", dir)
+	}
+	for name := range declared {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("declared binary asset %s is missing from %s — every declared digest must have its asset (TS-014-04-04)", name, dir)
+		}
+	}
+	return nil
 }

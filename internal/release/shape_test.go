@@ -180,7 +180,8 @@ func TestSignVerifyRoundtrip_WithShapeGuard(t *testing.T) {
 		&SourceManifest{ID: "anvil-standard-laravel", Version: "1.0.0", ContractVersion: "1.0.0", Capability: Capability{FrameworkVersion: []string{"10.0.0", "11.0.0", "12.0.0"}}},
 		"1.0.0",
 		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
-		digest, SignAttestation(payload, priv), pubB64,
+		[]ContentDigest{{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: digest}},
+		SignAttestation(payload, priv), pubB64,
 	)
 
 	// Shape guard passes on a properly derived document…
