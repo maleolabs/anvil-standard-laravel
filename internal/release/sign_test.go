@@ -137,7 +137,8 @@ func TestSignVerifyRoundtrip(t *testing.T) {
 		&SourceManifest{ID: "anvil-standard-laravel", Version: "1.0.0", ContractVersion: "1.0.0", Capability: Capability{FrameworkVersion: []string{"10.0.0", "11.0.0", "12.0.0"}}},
 		"1.0.0",
 		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
-		digest, sig, pubB64,
+		[]ContentDigest{{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: digest}},
+		sig, pubB64,
 	)
 	if err := VerifyAttestation(doc); err != nil {
 		t.Fatalf("VerifyAttestation: %v", err)
@@ -188,7 +189,8 @@ func TestVerifyDocument_IntegrityAndAttestation(t *testing.T) {
 		&SourceManifest{ID: "anvil-standard-laravel", Version: "1.0.0", ContractVersion: "1.0.0", Capability: Capability{FrameworkVersion: []string{"10.0.0", "11.0.0", "12.0.0"}}},
 		"1.0.0",
 		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
-		digest, SignAttestation(payload, priv), pubB64,
+		[]ContentDigest{{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: digest}},
+		SignAttestation(payload, priv), pubB64,
 	)
 
 	if err := VerifyDocument(doc, content); err != nil {
@@ -237,7 +239,7 @@ func TestDeriveDocument_ReplacesPlaceholders(t *testing.T) {
 		src,
 		"1.0.0",
 		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
-		strings.Repeat("a", 64),
+		[]ContentDigest{{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: strings.Repeat("a", 64)}},
 		"c2ln", "cHVi",
 	)
 	if doc.ID != "anvil-standard-laravel" || doc.Version != "1.0.0" || doc.ContractVersion != "1.0.0" {
@@ -284,4 +286,190 @@ func mustDecode(t *testing.T, s string) []byte {
 		t.Fatalf("decode: %v", err)
 	}
 	return b
+}
+
+// ── Binary asset attestation (TS-014-04-04) ─────────────────────────
+
+// buildAttestedRelease derives + signs a release document over the given
+// digest set (content first, then the named binary digests) and returns
+// the document, the archive content, and the private key.
+func buildAttestedRelease(t *testing.T, content []byte, contentDigests []ContentDigest) (*MetadataDocument, []byte) {
+	t.Helper()
+	dir := t.TempDir()
+	privPath := filepath.Join(dir, "key.pem")
+	pubPath := filepath.Join(dir, "key.pub.pem")
+	pubB64, err := GenerateKeyPair(privPath, pubPath)
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	priv, err := LoadPrivateKey(privPath)
+	if err != nil {
+		t.Fatalf("LoadPrivateKey: %v", err)
+	}
+	payload, err := AttestationPayload("anvil-standard-laravel", "1.0.0", contentDigests)
+	if err != nil {
+		t.Fatalf("AttestationPayload: %v", err)
+	}
+	doc := DeriveDocument(
+		&SourceManifest{ID: "anvil-standard-laravel", Version: "1.0.0", ContractVersion: "1.0.0", Capability: Capability{FrameworkVersion: []string{"10.0.0", "11.0.0", "12.0.0"}}},
+		"1.0.0",
+		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
+		contentDigests, SignAttestation(payload, priv), pubB64,
+	)
+	return doc, content
+}
+
+// TestBinaryAssetDigests_ComputesSortedNamedEntries verifies the
+// pipeline's per-asset digest computation: every regular file becomes a
+// named base16 entry, sorted by file name for a deterministic array
+// order (the order is signed material).
+func TestBinaryAssetDigests_ComputesSortedNamedEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "anvil-adapter-laravel-darwin-arm64"), []byte("darwin arm64"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "anvil-adapter-laravel-linux-amd64"), []byte("linux amd64"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digests, err := BinaryAssetDigests(dir)
+	if err != nil {
+		t.Fatalf("BinaryAssetDigests: %v", err)
+	}
+	if len(digests) != 2 {
+		t.Fatalf("digests = %d, want 2", len(digests))
+	}
+	if digests[0].Name != "anvil-adapter-laravel-darwin-arm64" || digests[1].Name != "anvil-adapter-laravel-linux-amd64" {
+		t.Fatalf("entries not sorted by name: %v", digests)
+	}
+	if digests[0].Digest != SHA256Base16([]byte("darwin arm64")) {
+		t.Errorf("entry digest mismatch for darwin arm64")
+	}
+	for i, d := range digests {
+		if d.Algorithm != DigestAlgorithmSHA256 || d.Encoding != DigestEncodingBase16 {
+			t.Errorf("entry [%d] algorithm/encoding: %+v", i, d)
+		}
+	}
+}
+
+// TestVerifyDocumentAndBinaryDigests_Valid asserts the full
+// TS-014-04-04 pipeline self-verification: a document carrying the
+// content digest plus named binary digests passes the shape guard, the
+// content verification (unnamed entries only), the attestation (over ALL
+// entries), and the per-asset binary verification.
+func TestVerifyDocumentAndBinaryDigests_Valid(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("release archive bytes")
+	bins := map[string][]byte{
+		"anvil-adapter-laravel-linux-amd64":  []byte("linux amd64 binary"),
+		"anvil-adapter-laravel-linux-arm64":  []byte("linux arm64 binary"),
+		"anvil-adapter-laravel-darwin-amd64": []byte("darwin amd64 binary"),
+	}
+	contentDigests := []ContentDigest{{
+		Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16(content),
+	}}
+	names := []string{"anvil-adapter-laravel-darwin-amd64", "anvil-adapter-laravel-linux-amd64", "anvil-adapter-laravel-linux-arm64"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), bins[name], 0o644); err != nil {
+			t.Fatal(err)
+		}
+		contentDigests = append(contentDigests, ContentDigest{
+			Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16,
+			Digest: SHA256Base16(bins[name]), Name: name,
+		})
+	}
+
+	doc, content := buildAttestedRelease(t, content, contentDigests)
+	if err := ValidateDocumentShape(doc); err != nil {
+		t.Fatalf("shape guard: %v", err)
+	}
+	if err := VerifyDocument(doc, content); err != nil {
+		t.Fatalf("VerifyDocument: %v", err)
+	}
+	if err := VerifyBinaryAssetDigests(doc, dir); err != nil {
+		t.Fatalf("VerifyBinaryAssetDigests: %v", err)
+	}
+}
+
+// TestVerifyDocument_NamedEntriesNotComparedWithContent asserts named
+// entries are asset-bound, not compared with the release content: a
+// named digest of the binary payload differs from the content hash and
+// verification still passes.
+func TestVerifyDocument_NamedEntriesNotComparedWithContent(t *testing.T) {
+	content := []byte("release archive bytes")
+	contentDigests := []ContentDigest{
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16(content)},
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("binary bytes, not content")), Name: "anvil-adapter-laravel-linux-amd64"},
+	}
+	doc, content := buildAttestedRelease(t, content, contentDigests)
+	if err := VerifyDocument(doc, content); err != nil {
+		t.Fatalf("VerifyDocument must not compare named entries with the release content: %v", err)
+	}
+}
+
+// TestVerifyBinaryAssetDigests_TamperedBinary asserts a binary that does
+// not match its declared digest fails the pipeline self-verification —
+// the exact tamper an adoption-time verifier aborts on (TS-014-04-04).
+func TestVerifyBinaryAssetDigests_TamperedBinary(t *testing.T) {
+	dir := t.TempDir()
+	name := "anvil-adapter-laravel-linux-amd64"
+	pristine := []byte("pristine linux amd64 binary")
+	if err := os.WriteFile(filepath.Join(dir, name), pristine, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contentDigests := []ContentDigest{
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("archive"))},
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16(pristine), Name: name},
+	}
+	doc, content := buildAttestedRelease(t, []byte("archive"), contentDigests)
+
+	// Tamper AFTER the release was produced (the same-channel attacker's
+	// move: the binary is replaced, the digest declaration is NOT — the
+	// signature still covers the declared digest).
+	if err := os.WriteFile(filepath.Join(dir, name), append(pristine, []byte("TAMPERED")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDocument(doc, content); err != nil {
+		t.Fatalf("VerifyDocument should pass (archive untouched): %v", err)
+	}
+	err := VerifyBinaryAssetDigests(doc, dir)
+	if err == nil || !strings.Contains(err.Error(), "does not match its declared digest") {
+		t.Fatalf("tampered binary must fail the asset verification, got: %v", err)
+	}
+}
+
+// TestVerifyBinaryAssetDigests_MissingAndUndeclaredAssets asserts the
+// two-way strict binding: a file without a declared digest and a
+// declared digest without its file both fail the release.
+func TestVerifyBinaryAssetDigests_MissingAndUndeclaredAssets(t *testing.T) {
+	dir := t.TempDir()
+	name := "anvil-adapter-laravel-linux-amd64"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contentDigests := []ContentDigest{
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("archive"))},
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("binary")), Name: name},
+	}
+	doc, _ := buildAttestedRelease(t, []byte("archive"), contentDigests)
+
+	// A file with no declared entry.
+	if err := os.WriteFile(filepath.Join(dir, "anvil-adapter-laravel-linux-arm64"), []byte("undeclared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyBinaryAssetDigests(doc, dir); err == nil || !strings.Contains(err.Error(), "has no declared digest") {
+		t.Fatalf("undeclared asset must fail, got: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "anvil-adapter-laravel-linux-arm64")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A declared entry whose file is missing.
+	doc2 := *doc
+	doc2.Trust.ContentDigests = append(doc2.Trust.ContentDigests, ContentDigest{
+		Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16,
+		Digest: SHA256Base16([]byte("ghost")), Name: "anvil-adapter-laravel-darwin-arm64",
+	})
+	if err := VerifyBinaryAssetDigests(&doc2, dir); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("declared asset without a file must fail, got: %v", err)
+	}
 }

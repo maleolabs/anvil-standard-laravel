@@ -16,16 +16,23 @@
 #   4. package the release artifact: a single archive carrying the standard
 #      content (platform binaries + source manifest + the standard parts);
 #   5. compute the REAL content digest (sha-256, canonical base16) over the
-#      archive and derive the publishable registry metadata document from
-#      the source manifest — distribution/lifecycle/trust are populated
-#      with real values (the source manifest's placeholder trust is never
-#      shipped; TS-016-03-02);
+#      archive AND over each platform binary (TS-014-04-04) and derive the
+#      publishable registry metadata document from the source manifest —
+#      distribution/lifecycle/trust are populated with real values (the
+#      source manifest's placeholder trust is never shipped; TS-016-03-02);
+#      the archive digest is the unnamed trust.contentDigests entry, each
+#      binary digest is a NAMED entry binding the asset to the attested
+#      release — closing the same-channel-checksum trust gap
+#      (TS-016-04-01 §6 accepted risk 1; Core verifies every installed
+#      binary against these digests, TS-014-04-04);
 #   6. sign the canonical attestation payload (Ed25519; the payload is
-#      utf8(id) || 0x00 || utf8(version) || 0x00 || digest bytes — the exact
-#      composition the Core registry client verifies, internal/registry/
-#      trust.go) with the release signing key;
-#   7. self-verify the produced document (the release pipeline never
-#      publishes material it cannot verify);
+#      utf8(id) || 0x00 || utf8(version) || 0x00 || concat(decoded digest
+#      bytes in contentDigests array order) — the exact composition the
+#      Core registry client verifies, internal/registry/trust.go) with the
+#      release signing key; the signature binds the archive AND every
+#      binary asset;
+#   7. self-verify the produced document and binaries (the release
+#      pipeline never publishes material it cannot verify);
 #   8. [--publish] create the GitHub release with the gh CLI (assets:
 #      archive, registry metadata document, checksums, platform binaries).
 #
@@ -250,6 +257,7 @@ go run "./cmd/release-sign" sign \
     --archive "${ARCHIVE}" \
     --location "${DIST_LOCATION}" \
     --key "${KEY_FILE}" \
+    --binaries "${OUT_DIR}/binaries" \
     --out "${META_DOC}"
 PUBLIC_KEY="$(jq -r '.trust.attestation.publicKey' "${META_DOC}")"
 log "registry metadata document: ${META_DOC}"
@@ -257,7 +265,8 @@ log "registry metadata document: ${META_DOC}"
 # ── 7. Self-verify the produced release ────────────────────────────
 go run "./cmd/release-sign" verify \
     --document "${META_DOC}" \
-    --archive "${ARCHIVE}"
+    --archive "${ARCHIVE}" \
+    --binaries "${OUT_DIR}/binaries"
 log "self-verification: PASS"
 
 # ── Checksums + trust anchors snippet ──────────────────────────────
@@ -298,14 +307,19 @@ Release of the Laravel delivery lifecycle standard, registry version
 
 - \`${ARCHIVE_NAME}\` — the release content (platform binaries + standard parts); distribution.location of this release
 - \`registry-metadata-${META_VERSION}.json\` — the registry metadata document (id, version, contract version, capability, distribution, lifecycle, trust)
-- \`SHA256SUMS.txt\` — checksums of every asset
+- \`SHA256SUMS.txt\` — checksums of every asset (same-channel fallback material for adopters without the attestation path)
 
 ## Trust (ADR-022)
 
 This release is signed with an Ed25519 release-time key over the canonical
-attestation payload (\`utf8(id) || 0x00 || utf8(version) || 0x00 || digest
-bytes\`). Pin the public key out of band to establish publisher origin
-(no first-use acceptance):
+attestation payload (\`utf8(id) || 0x00 || utf8(version) || 0x00 ||
+concat(decoded digest bytes in contentDigests array order)\`). The
+attestation binds the release archive AND every platform binary: each
+binary's sha-256 digest is carried as a NAMED \`trust.contentDigests\`
+entry (TS-014-04-04), so an adoption verifies each installed binary
+against attestation-bound material — not only the same-channel
+\`SHA256SUMS.txt\`. Pin the public key out of band to establish publisher
+origin (no first-use acceptance):
 
 \`\`\`json
 {

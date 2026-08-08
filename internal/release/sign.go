@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -187,10 +188,13 @@ func VerifyAttestation(doc *MetadataDocument) error {
 //
 //  0. shape — the document must satisfy the strict-parser format surface
 //     (ValidateDocumentShape, the self-parse guard);
-//  1. integrity — every declared content digest must equal the recomputed
-//     SHA-256 of the release content (all-match semantics);
+//  1. integrity — every declared CONTENT digest (the entries without a
+//     name, TS-014-04-04) must equal the recomputed SHA-256 of the
+//     release content (all-match semantics); named entries are
+//     asset-bound and are verified by VerifyBinaryAssetDigests;
 //  2. attestation — the Ed25519 signature verifies over the canonical
-//     payload with the declared public key.
+//     payload (which concatenates EVERY declared digest, named entries
+//     included) with the declared public key.
 //
 // Origin (the out-of-band trust anchor) is an operator-side concern and is
 // deliberately NOT verified here: the pipeline proves the release is
@@ -200,11 +204,23 @@ func VerifyDocument(doc *MetadataDocument, content []byte) error {
 	if err := ValidateDocumentShape(doc); err != nil {
 		return err
 	}
-	if len(doc.Trust.ContentDigests) == 0 {
-		return errors.New("the release declares no content digests; a release without integrity material cannot be verified (ADR-022 §3)")
+	contentDigests := 0
+	for _, d := range doc.Trust.ContentDigests {
+		if d.Name == "" {
+			contentDigests++
+		}
+	}
+	if contentDigests == 0 {
+		return errors.New("the release declares no content digest for the release content (every trust.contentDigests entry is a named asset digest); a release without release-content integrity material cannot be verified (ADR-022 §3)")
 	}
 	sum := sha256Bytes(content)
 	for i, d := range doc.Trust.ContentDigests {
+		if d.Name != "" {
+			// Asset-bound entry: verified against its named asset by
+			// VerifyBinaryAssetDigests, not against the release content
+			// (TS-014-04-04).
+			continue
+		}
 		decoded, err := decodeDigest(d)
 		if err != nil {
 			return fmt.Errorf("content digest entry [%d] is not verification material: %v", i, err)
@@ -214,4 +230,62 @@ func VerifyDocument(doc *MetadataDocument, content []byte) error {
 		}
 	}
 	return VerifyAttestation(doc)
+}
+
+// VerifyBinaryAssetDigests verifies the binary assets of a release
+// against the document's named digest entries (TS-014-04-04), two-way
+// strict: every binary file in dir must have a declared entry that
+// matches its recomputed SHA-256, and every declared named entry must
+// have its file — the pipeline never publishes a digest without its
+// asset, and never ships an asset without its digest. A directory with
+// no files fails the release: a release that declares named entries must
+// actually carry the assets (mirrors the Core asset-install verifier
+// semantics: mismatch aborts).
+func VerifyBinaryAssetDigests(doc *MetadataDocument, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read binaries directory %s: %w", dir, err)
+	}
+	declared := make(map[string]ContentDigest)
+	for _, d := range doc.Trust.ContentDigests {
+		if d.Name != "" {
+			if _, dup := declared[d.Name]; dup {
+				return fmt.Errorf("binary asset %q is declared twice (two entries cannot bind the same asset)", d.Name)
+			}
+			declared[d.Name] = d
+		}
+	}
+
+	files := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		files++
+		name := entry.Name()
+		d, ok := declared[name]
+		if !ok {
+			return fmt.Errorf("binary asset %s has no declared digest in trust.contentDigests — every shipped binary must be attested (TS-014-04-04)", name)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read binary asset %s: %w", name, err)
+		}
+		expected, err := decodeDigest(d)
+		if err != nil {
+			return fmt.Errorf("binary asset %s: declared entry is not verification material: %v", name, err)
+		}
+		if !bytes.Equal(expected, sha256Bytes(data)) {
+			return fmt.Errorf("binary asset %s does not match its declared digest (%s %s) — the asset was tampered with or the digest is stale; aborting the release", name, d.Encoding, d.Digest)
+		}
+	}
+	if files == 0 {
+		return fmt.Errorf("binaries directory %s is empty — the release declares no binary assets to verify", dir)
+	}
+	for name := range declared {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("declared binary asset %s is missing from %s — every declared digest must have its asset (TS-014-04-04)", name, dir)
+		}
+	}
+	return nil
 }
