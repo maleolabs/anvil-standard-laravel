@@ -52,16 +52,21 @@ The Release is **not** automatically activated.
 anvil server release activate my-app <release-id>
 ```
 
-The artifact is extracted into the release directory (shared links applied), the release is promoted to active, and then the **adapter activation phases** run — each as `php artisan <command>` from the release directory:
+The artifact is extracted into the release directory (shared links applied), the release is promoted to active, and then the **adapter activation phases** run — each as `php artisan <command>` from the release directory, in the declared order (migration → cache warming → queue; see the [Lifecycle Definition](../lifecycle/definition.md)):
 
-| Order | Phase | Command | Reversible? |
-|---|---|---|---|
-| 1 | `migrate` | `php artisan migrate --force` | Reversible (`migrate:rollback`) |
-| 2 | `config_cache` | `php artisan config:cache` | Irreversible |
-| 3 | `route_cache` | `php artisan route:cache` | Irreversible |
-| 4 | `event_cache` | `php artisan event:cache` | Irreversible |
+| Order | Group | Phase | Command | Reversible? |
+|---|---|---|---|---|
+| 1 | migration | `migrate` | `php artisan migrate --force` | Reversible (`migrate:rollback`) |
+| 2 | cache warming | `config_cache` | `php artisan config:cache` | Irreversible |
+| 3 | cache warming | `route_cache` | `php artisan route:cache` | Irreversible |
+| 4 | cache warming | `event_cache` | `php artisan event:cache` | Irreversible |
+| 5 | queue | `queue_restart` | `php artisan queue:restart` | Irreversible |
 
-A failing phase fails the activation command with an error. Note the ordering: the release is promoted to `active` **before** the adapter phases run, so a failed phase leaves the release recorded as active — re-run `anvil server release activate` to converge (the phases are re-executed from the start).
+**Migration timing relative to promotion.** The release is promoted to `active` **before** the adapter phases run — migrations are declared **post-promotion** (`post_promotion`, pinned by `MigrationTiming()` in `internal/laravel/activation.go`). A failed phase fails the activation command with an error and leaves the release recorded as active — re-run `anvil server release activate` to converge (the phases are re-executed from the start; `migrate --force` skips already-applied migrations).
+
+**Failure semantics.** A failing phase fails the activation; per-phase semantics are declared in the [Lifecycle Definition](../lifecycle/definition.md) — migrations converge on re-run, caches are regenerated from code, and the queue restart signal is idempotent (re-sending it is safe).
+
+**Queue restart.** `queue_restart` runs last, after migration and cache warming: `php artisan queue:restart` signals running workers to recycle so they pick up the new code, migrations, and caches — no worker processes a job against stale state.
 
 ## 4. Roll back a Release
 
@@ -72,9 +77,10 @@ anvil server release rollback my-app
 Rollback restores the previously active release, then runs the adapter rollback operations:
 
 | Phase | Rollback behavior |
-|---|---|
-| `migrate` | `php artisan migrate:rollback` — reverses the migration |
+|---|---|---|
+| `migrate` | `php artisan migrate:rollback` — reverses the migration batch applied by the activation |
 | `config_cache` / `route_cache` / `event_cache` | **Irreversible** — a rollback cannot undo a cache. The adapter reports an *informational* result and the rollback proceeds without undoing these operations. The restored release's own activation regenerates its caches from its code. |
+| `queue_restart` | **Irreversible** — a rollback cannot un-send the worker restart signal. The adapter reports an *informational* result and the rollback proceeds; the restored release's own activation re-signals its workers. |
 
 Rollback never blocks on irreversible phases.
 

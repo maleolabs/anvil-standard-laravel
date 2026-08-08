@@ -13,13 +13,14 @@ Both fields are omitted from the manifest when empty.
 
 ## Laravel values
 
-**Activation commands** (execution order — migration first, then cache warming):
+**Activation commands** (execution order — migration first, then cache warming, then the queue restart signal):
 
 ```text
 php artisan migrate --force
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
+php artisan queue:restart
 ```
 
 **Rollback commands:**
@@ -47,6 +48,6 @@ There is a **documented divergence** between the two command surfaces:
 | Manifest activation metadata (ADR-017) | `php artisan view:cache` |
 | Executable activation pipeline (adapter phases) | `php artisan event:cache` |
 
-The manifest strings are the *metadata* form; the executable phase table is the *behavior* Anvil runs today during `server release activate` (see [deploy.md](deploy.md)). This divergence is a deliberate, documented decision — it must not be "fixed" by aligning one to the other.
+The manifest strings are the *metadata* form; the executable phase table is the *behavior* Anvil runs today during `server release activate` (see [deploy.md](deploy.md)). This divergence is a deliberate, documented decision — it must not be "fixed" by aligning one to the other. The `queue:restart` command appears in **both** surfaces, always last: worker recycling is part of the executable activation pipeline (TS-018-01-01) and of the manifest metadata.
 
 See also: [Deploy](deploy.md) — the executable activation pipeline · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md)
