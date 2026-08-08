@@ -38,6 +38,16 @@ validated against the supported framework versions listed above; content
 changes for newer framework versions are released as new standard
 versions, never silently.
 
+**Template freshness.** The Templates part (build pipeline template and
+config extension validation rules — [templates/README.md](../templates/README.md))
+must stay fresh against the supported framework versions: when a version
+enters or leaves the support scope, the maintainer re-verifies the build
+steps and validation rules before releasing. Freshness is a maintainer
+responsibility (007 §7; Transition Plan §4.7) — the runtime executes what
+the standard ships and never patches stale content; content changes ship
+as new standard versions, never as a Core change (ADR-021 §3.5, ADR-025
+§3.5).
+
 ## Versioning policy
 
 - The standard versions independently from the Core runtime (ADR-021

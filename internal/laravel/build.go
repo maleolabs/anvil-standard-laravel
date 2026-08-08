@@ -39,56 +39,76 @@ const (
 	PhaseNpm = "npm"
 )
 
-// buildPhase defines one build phase: the command runner that executes
-// it (the production runner, or an injected fake in tests) and the
-// arguments passed to the runner.
+// buildPhase defines one build phase: the program that executes it, the
+// command runner that runs it (the production runner, or an injected
+// fake in tests) and the arguments passed to the runner.
 //
 // Reference: TS-P7-14
 type buildPhase struct {
 	// name is the phase identifier (Phase* constants).
 	name string
 
+	// program is the executable the phase runs ("composer", "npm", or
+	// "php" for artisan). The build execution ignores it — the runner
+	// prepends its own program — but it is part of the phase's build
+	// knowledge and the pipeline template derives each task's command
+	// from it (internal/laravel/template.go, TS-018-01-02): the phase
+	// table stays the single source of build knowledge.
+	program string
+
 	// runner executes the phase command. It is the production runner
 	// (runComposer, runNpm, or runArtisan); tests replace it with a
 	// fake through RunBuild.
 	runner commandRunner
 
-	// args are the command arguments (without the program prefix —
-	// runComposer/runNpm/runArtisan prepend their own program).
+	// args are the command arguments in runner form: runComposer and
+	// runNpm receive the full argument vector after their program
+	// ("composer <args>", "npm <args>"), runArtisan receives the
+	// artisan command only ("php artisan <args>") — it prepends
+	// "artisan" itself. The pipeline template translates these into
+	// the full task command line (internal/laravel/template.go).
 	args []string
 }
 
 // buildPhases is the adapter's build phase table, in execution order:
 // dependencies (composer), assets (npm), then the artisan optimization
 // caches (config, routes, views) — composer -> npm -> artisan
-// (TS-P7-14 AC-6).
+// (TS-P7-14 AC-6). The table is the single source of build knowledge:
+// the pipeline template derives its task commands and arguments from it
+// (internal/laravel/template.go, TS-018-01-02), so the generated
+// build.yaml can never drift from the executed build.
 //
 // Reference: TS-P7-14 AC-1..AC-6
 var buildPhases = []buildPhase{
 	{
-		name:   PhaseComposer,
-		runner: runComposer,
-		args:   []string{"install", "--no-dev", "--optimize-autoloader"},
+		name:    PhaseComposer,
+		program: "composer",
+		runner:  runComposer,
+		args:    []string{"install", "--no-dev", "--optimize-autoloader"},
 	},
 	{
-		name:   PhaseNpm,
-		runner: runNpm,
-		args:   []string{"run", "build"},
+		name:    PhaseNpm,
+		program: "npm",
+		runner:  runNpm,
+		args:    []string{"run", "build"},
 	},
 	{
-		name:   PhaseConfigCache,
-		runner: runArtisan,
-		args:   []string{"config:cache"},
+		name:    PhaseConfigCache,
+		program: "php",
+		runner:  runArtisan,
+		args:    []string{"config:cache"},
 	},
 	{
-		name:   PhaseRouteCache,
-		runner: runArtisan,
-		args:   []string{"route:cache"},
+		name:    PhaseRouteCache,
+		program: "php",
+		runner:  runArtisan,
+		args:    []string{"route:cache"},
 	},
 	{
-		name:   PhaseViewCache,
-		runner: runArtisan,
-		args:   []string{"view:cache"},
+		name:    PhaseViewCache,
+		program: "php",
+		runner:  runArtisan,
+		args:    []string{"view:cache"},
 	},
 }
 
