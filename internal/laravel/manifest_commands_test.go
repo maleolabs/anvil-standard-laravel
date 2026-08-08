@@ -10,19 +10,21 @@ import (
 )
 
 // TestActivationCommands_ExactOrder pins ActivationCommands to the
-// documented manifest metadata contract (TS-P7-15 AC-3, ADR-017):
-// exactly the four activation commands in execution order — database
-// migration first, then cache warming for config, routes, and views —
-// including the `view:cache` form. This is the manifest surface, which
-// deliberately diverges from the executable activation phase table
-// (`event:cache`, TS-P7-09) per 005-adapter-command-contract §10.10; the
-// divergence is documented and must not be aligned (TD-012).
+// documented manifest metadata contract (TS-P7-15 AC-3, TS-018-01-01,
+// ADR-017): exactly the five activation commands in execution order —
+// database migration first, then cache warming for config, routes, and
+// views, then the queue restart signal last — including the `view:cache`
+// form. This is the manifest surface, which deliberately diverges from
+// the executable activation phase table (`event:cache`, TS-P7-09) per
+// 005-adapter-command-contract §10.10; the divergence is documented and
+// must not be aligned (TD-012).
 func TestActivationCommands_ExactOrder(t *testing.T) {
 	want := []string{
 		"php artisan migrate --force",
 		"php artisan config:cache",
 		"php artisan route:cache",
 		"php artisan view:cache",
+		"php artisan queue:restart",
 	}
 
 	got := ActivationCommands()
@@ -56,7 +58,7 @@ func TestActivationCommands_OrderMatchesPhaseTable(t *testing.T) {
 	// `php artisan <args>` form and appear in the phase table order.
 	// The index of each phase command in the manifest must be
 	// monotonically increasing in phase table order.
-	sharedPhaseNames := []string{PhaseMigrate, PhaseConfigCache, PhaseRouteCache}
+	sharedPhaseNames := []string{PhaseMigrate, PhaseConfigCache, PhaseRouteCache, PhaseQueueRestart}
 	prevIndex := -1
 	for _, name := range sharedPhaseNames {
 		p, ok := lookupPhase(name)
@@ -83,16 +85,40 @@ func TestActivationCommands_OrderMatchesPhaseTable(t *testing.T) {
 }
 
 // TestRollbackCommands_Exact verifies that RollbackCommands returns
-// exactly the migrate:rollback command as a string array (TS-P7-16
-// AC-1, AC-3).
+// exactly the force-confirmed migrate rollback command as a string array
+// (TS-P7-16 AC-1, AC-3). The `--force` flag mirrors the executable
+// rollback phase (activation.go): Laravel's RollbackCommand uses
+// ConfirmableTrait, and the orchestrator executes manifest commands as
+// non-interactive subprocesses where the default confirmation answer is
+// "no" — without --force the rollback would be cancelled in production.
 func TestRollbackCommands_Exact(t *testing.T) {
 	want := []string{
-		"php artisan migrate:rollback",
+		"php artisan migrate:rollback --force",
 	}
 
 	got := RollbackCommands()
 
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("RollbackCommands() = %v, want %v", got, want)
+	}
+}
+
+// TestRollbackCommands_MatchesPhaseTable verifies that the manifest
+// rollback command stays consistent with the executable rollback phase
+// (activation.go): the manifest string is the `php artisan <args>` form
+// of the migrate phase's rollbackArgs. Both surfaces must carry the same
+// force-confirmed command — the orchestrator executes the manifest form,
+// the adapter the phase-table form, and a divergence would mean rollback
+// behaves differently depending on the execution path.
+func TestRollbackCommands_MatchesPhaseTable(t *testing.T) {
+	p, ok := lookupPhase(PhaseMigrate)
+	if !ok {
+		t.Fatalf("phase %q missing from phase table", PhaseMigrate)
+	}
+	want := "php artisan " + strings.Join(p.rollbackArgs, " ")
+
+	got := RollbackCommands()
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("RollbackCommands() = %v, want [%q] derived from the migrate phase rollback args %v", got, want, p.rollbackArgs)
 	}
 }
