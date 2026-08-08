@@ -71,6 +71,51 @@ func TestConfigExtension_DeclaredKeys(t *testing.T) {
 	}
 }
 
+// TestConfigExtension_EveryDeclaredKeyHasValidationRule verifies that
+// every key the extension declares is validated by the adapter — no
+// declared key can silently pass through the unknown-key rejection
+// (TS-P7-03 AC-4, TS-018-01-02: the standard validates its own
+// extension values). Each declared key is validated with its declared
+// default where present, or a documented valid sample for optional keys;
+// the "unknown configuration key" error for any declared key is a
+// contract failure.
+func TestConfigExtension_EveryDeclaredKeyHasValidationRule(t *testing.T) {
+	declared := ConfigExtension()
+	if len(declared.Extension.Keys) == 0 {
+		t.Fatal("extension declares no keys, want at least one")
+	}
+
+	// Sample values per key: the declared default where present, else a
+	// documented valid value for the optional keys. Unknown keys are
+	// covered by the declared set itself.
+	samples := map[string]string{
+		KeyMigrationsPath: "database/migrations",
+		KeyCacheStore:     "file",
+		KeyVersion:        "11.0.0",
+		KeyPHPVersion:     "",
+		KeyComposerFlags:  "",
+	}
+
+	var values []contracts.ConfigValue
+	for _, key := range declared.Extension.Keys {
+		sample, ok := samples[key.Name]
+		if !ok {
+			t.Fatalf("declared key %q has no validation sample in the test; extend the samples map", key.Name)
+		}
+		values = append(values, contracts.ConfigValue{Key: key.Name, Value: sample})
+	}
+
+	result := ValidateConfigValues(contracts.ConfigValidationRequest{Values: values})
+	if !result.Valid {
+		t.Fatalf("declared keys failed validation with their own defaults (errors: %v)", result.Errors)
+	}
+	for _, err := range result.Errors {
+		if strings.Contains(err, "unknown configuration key") {
+			t.Errorf("declared key rejected as unknown: %s", err)
+		}
+	}
+}
+
 // TestValidateConfigValues_Valid verifies that valid Laravel values pass
 // validation (TS-P7-12 AC-3, TS-P7-18 AC-3). A path with an internal
 // ".." segment that cleans to a non-escaping path (e.g.
