@@ -95,7 +95,14 @@ anvil pipeline build
 # 3. Package an immutable artifact
 anvil artifact package
 
-# 4. On the target server: initialize the Runtime and register the project
+# 4. Deliver the artifact to the target server — SSH transport (TD-006):
+#    `anvil deployment upload` transports the artifact from the build
+#    machine or CI to the server and needs no local server state (see the
+#    terminology note in deploy.md); the artifact is then on the server's
+#    filesystem, ready for install
+anvil deployment upload <artifact>.tar.gz
+
+# 5. On the target server: initialize the Runtime and register the project
 anvil server init
 anvil server project register \
   --project-id my-app \
@@ -103,13 +110,13 @@ anvil server project register \
   --adapter laravel \
   --non-interactive
 
-# 5. Install the artifact as a Release (runs the 8 verification checks)
+# 6. Install the artifact as a Release (runs the 8 verification checks)
 anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 
-# 6. Activate the Release (runs the 5 activation phases)
+# 7. Activate the Release (runs the 5 activation phases)
 anvil server release activate my-app <release-id>
 
-# 7. Roll back if needed
+# 8. Roll back if needed
 anvil server release rollback my-app
 ```
 
