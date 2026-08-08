@@ -15,17 +15,23 @@ package laravel
 
 // ActivationCommands returns the Laravel activation commands in
 // execution order: database migration first, then cache warming
-// (config, routes, views). The full commands (including the `php
-// artisan` prefix) are stored in the artifact manifest per ADR-017 and
-// executed by the orchestrator during release activation.
+// (config, routes, views), then the queue restart signal (TS-018-01-01).
+// The full commands (including the `php artisan` prefix) are stored in
+// the artifact manifest per ADR-017 and executed by the orchestrator
+// during release activation.
 //
-// Reference: TS-P7-15 AC-1..AC-4, ADR-017
+// The cache form diverges from the executable activation phase table by
+// design (view:cache here, event:cache in the table — TD-012); the queue
+// restart command appears in both surfaces, always last.
+//
+// Reference: TS-P7-15 AC-1..AC-4, TS-018-01-01, ADR-017
 func ActivationCommands() []string {
 	return []string{
 		"php artisan migrate --force",
 		"php artisan config:cache",
 		"php artisan route:cache",
 		"php artisan view:cache",
+		"php artisan queue:restart",
 	}
 }
 

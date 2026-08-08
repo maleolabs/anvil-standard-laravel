@@ -49,8 +49,8 @@ func TestRun_Capabilities(t *testing.T) {
 	var result contracts.CapabilityResult
 	decodeStdout(t, stdout, &result)
 
-	if len(result.Declaration.ActivationPhases) != 4 {
-		t.Errorf("ActivationPhases length = %d, want 4", len(result.Declaration.ActivationPhases))
+	if len(result.Declaration.ActivationPhases) != 5 {
+		t.Errorf("ActivationPhases length = %d, want 5", len(result.Declaration.ActivationPhases))
 	}
 	if len(result.Declaration.VerificationChecks) != 8 {
 		t.Errorf("VerificationChecks length = %d, want 8", len(result.Declaration.VerificationChecks))
@@ -439,6 +439,7 @@ func TestRun_Manifest(t *testing.T) {
 		"php artisan config:cache",
 		"php artisan route:cache",
 		"php artisan view:cache",
+		"php artisan queue:restart",
 	}
 	if !reflectEqual(result.ActivationCommands, wantActivation) {
 		t.Errorf("ActivationCommands = %v, want %v", result.ActivationCommands, wantActivation)
@@ -459,8 +460,8 @@ func TestRun_ManifestIgnoresPayload(t *testing.T) {
 	}
 	var result contracts.ManifestCommandResult
 	decodeStdout(t, stdout, &result)
-	if len(result.ActivationCommands) != 4 {
-		t.Errorf("ActivationCommands length = %d, want 4", len(result.ActivationCommands))
+	if len(result.ActivationCommands) != 5 {
+		t.Errorf("ActivationCommands length = %d, want 5", len(result.ActivationCommands))
 	}
 }
 

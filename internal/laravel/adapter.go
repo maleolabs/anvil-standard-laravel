@@ -49,6 +49,7 @@ func Capabilities() contracts.CapabilityResult {
 				PhaseConfigCache,
 				PhaseRouteCache,
 				PhaseEventCache,
+				PhaseQueueRestart,
 			},
 			BuildPhases: []string{
 				PhaseComposer,

@@ -10,19 +10,21 @@ import (
 )
 
 // TestActivationCommands_ExactOrder pins ActivationCommands to the
-// documented manifest metadata contract (TS-P7-15 AC-3, ADR-017):
-// exactly the four activation commands in execution order — database
-// migration first, then cache warming for config, routes, and views —
-// including the `view:cache` form. This is the manifest surface, which
-// deliberately diverges from the executable activation phase table
-// (`event:cache`, TS-P7-09) per 005-adapter-command-contract §10.10; the
-// divergence is documented and must not be aligned (TD-012).
+// documented manifest metadata contract (TS-P7-15 AC-3, TS-018-01-01,
+// ADR-017): exactly the five activation commands in execution order —
+// database migration first, then cache warming for config, routes, and
+// views, then the queue restart signal last — including the `view:cache`
+// form. This is the manifest surface, which deliberately diverges from
+// the executable activation phase table (`event:cache`, TS-P7-09) per
+// 005-adapter-command-contract §10.10; the divergence is documented and
+// must not be aligned (TD-012).
 func TestActivationCommands_ExactOrder(t *testing.T) {
 	want := []string{
 		"php artisan migrate --force",
 		"php artisan config:cache",
 		"php artisan route:cache",
 		"php artisan view:cache",
+		"php artisan queue:restart",
 	}
 
 	got := ActivationCommands()
@@ -56,7 +58,7 @@ func TestActivationCommands_OrderMatchesPhaseTable(t *testing.T) {
 	// `php artisan <args>` form and appear in the phase table order.
 	// The index of each phase command in the manifest must be
 	// monotonically increasing in phase table order.
-	sharedPhaseNames := []string{PhaseMigrate, PhaseConfigCache, PhaseRouteCache}
+	sharedPhaseNames := []string{PhaseMigrate, PhaseConfigCache, PhaseRouteCache, PhaseQueueRestart}
 	prevIndex := -1
 	for _, name := range sharedPhaseNames {
 		p, ok := lookupPhase(name)
