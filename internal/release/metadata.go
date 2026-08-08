@@ -265,13 +265,25 @@ func DeriveDocument(src *SourceManifest, version, location string, contentDigest
 	}
 }
 
-// WriteDocument writes the metadata document as pretty-printed JSON.
-func WriteDocument(doc *MetadataDocument, path string) error {
+// DocumentBytes renders the metadata document as pretty-printed JSON
+// with a trailing newline — the EXACT bytes written to the release asset
+// (registry-metadata-<version>.json) and the bytes the detached document
+// signature covers (SignDocumentBytes, security review F-1).
+func DocumentBytes(doc *MetadataDocument) ([]byte, error) {
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode metadata document: %w", err)
+		return nil, fmt.Errorf("encode metadata document: %w", err)
 	}
-	raw = append(raw, '\n')
+	return append(raw, '\n'), nil
+}
+
+// WriteDocument writes the metadata document as pretty-printed JSON
+// (DocumentBytes) to path.
+func WriteDocument(doc *MetadataDocument, path string) error {
+	raw, err := DocumentBytes(doc)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return fmt.Errorf("write metadata document %s: %w", path, err)
 	}

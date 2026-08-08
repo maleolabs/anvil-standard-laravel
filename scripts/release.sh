@@ -33,8 +33,19 @@
 #      binary asset;
 #   7. self-verify the produced document and binaries (the release
 #      pipeline never publishes material it cannot verify);
-#   8. [--publish] create the GitHub release with the gh CLI (assets:
-#      archive, registry metadata document, checksums, platform binaries).
+#   8. [stable key only] emit the DETACHED document signature
+#      registry-metadata-<v>.json.sig — an Ed25519 signature over the RAW
+#      metadata document bytes, DISTINCT from the in-document canonical
+#      attestation (F-1): the bootstrap installer (install.sh) verifies it
+#      with its pinned publisher key before trusting the document's
+#      digests. Emitted only when a STABLE signing key is supplied
+#      (RELEASE_SIGNING_KEY / --key): a release-time key cannot be pinned
+#      out of band, and a .sig no pinned key verifies would fail installs
+#      closed. Releases without a stable key ship no .sig and keep the
+#      checksum fallback path;
+#   9. [--publish] create the GitHub release with the gh CLI (assets:
+#      archive, registry metadata document, checksums, platform binaries,
+#      detached signature when emitted).
 #
 # Trust model (ADR-022; PM decision D-01, D-07):
 #   - a release-time Ed25519 key pair is generated for every release unless
@@ -251,6 +262,14 @@ fi
 # ── 6. Derive + sign the registry metadata document ────────────────
 DIST_LOCATION="${REPO_URL}/releases/download/v${TAG_VERSION}/${ARCHIVE_NAME}"
 META_DOC="${OUT_DIR}/registry-metadata-${META_VERSION}.json"
+# The detached document signature (F-1) is emitted ONLY with a STABLE
+# signing key: install.sh pins the publisher's public key out of band,
+# so a release-time key can never verify there (and a stray .sig would
+# fail installs closed). See the pipeline notes above.
+SIG_ARGS=()
+if [ "${GENERATE_KEY}" -eq 0 ]; then
+    SIG_ARGS+=(--sig "${OUT_DIR}/registry-metadata-${META_VERSION}.json.sig")
+fi
 go run "./cmd/release-sign" sign \
     --manifest "${SOURCE_MANIFEST}" \
     --version "${META_VERSION}" \
@@ -258,15 +277,17 @@ go run "./cmd/release-sign" sign \
     --location "${DIST_LOCATION}" \
     --key "${KEY_FILE}" \
     --binaries "${OUT_DIR}/binaries" \
+    "${SIG_ARGS[@]}" \
     --out "${META_DOC}"
 PUBLIC_KEY="$(jq -r '.trust.attestation.publicKey' "${META_DOC}")"
 log "registry metadata document: ${META_DOC}"
 
 # ── 7. Self-verify the produced release ────────────────────────────
-go run "./cmd/release-sign" verify \
-    --document "${META_DOC}" \
-    --archive "${ARCHIVE}" \
-    --binaries "${OUT_DIR}/binaries"
+VERIFY_ARGS=("--document" "${META_DOC}" "--archive" "${ARCHIVE}" "--binaries" "${OUT_DIR}/binaries")
+if [ "${GENERATE_KEY}" -eq 0 ]; then
+    VERIFY_ARGS+=(--sig "${OUT_DIR}/registry-metadata-${META_VERSION}.json.sig")
+fi
+go run "./cmd/release-sign" verify "${VERIFY_ARGS[@]}"
 log "self-verification: PASS"
 
 # ── Checksums + trust anchors snippet ──────────────────────────────
@@ -291,6 +312,10 @@ if [ "${PUBLISH}" -eq 1 ]; then
     TITLE="v${TAG_VERSION}"
     PRERELEASE_FLAG=""
     NOTES="${OUT_DIR}/release-notes.md"
+    SIG_ASSET=()
+    if [ "${GENERATE_KEY}" -eq 0 ]; then
+        SIG_ASSET+=("${OUT_DIR}/registry-metadata-${META_VERSION}.json.sig")
+    fi
     if [ "${PRERELEASE}" -eq 1 ]; then
         PRERELEASE_FLAG="--prerelease"
         TITLE="v${TAG_VERSION} (TEST / pre-release)"
@@ -306,7 +331,8 @@ Release of the Laravel delivery lifecycle standard, registry version
 ## Artifacts
 
 - \`${ARCHIVE_NAME}\` — the release content (platform binaries + standard parts); distribution.location of this release
-- \`registry-metadata-${META_VERSION}.json\` — the registry metadata document (id, version, contract version, capability, distribution, lifecycle, trust)
+- \`registry-metadata-${META_VERSION}.json\` — the registry metadata document (id, version, contract version, capability, distribution, lifecycle, trust)$(if [ "${GENERATE_KEY}" -eq 0 ]; then echo "
+- \`registry-metadata-${META_VERSION}.json.sig\` — the DETACHED Ed25519 signature over the raw metadata document bytes (F-1): the bootstrap installer verifies it with its pinned publisher key before trusting the document's digests"; fi)
 - \`SHA256SUMS.txt\` — checksums of every asset (same-channel fallback material for adopters without the attestation path)
 
 ## Trust (ADR-022)
@@ -339,6 +365,7 @@ EOF
         "${BIN_DIR}"/* \
         "${ARCHIVE}" \
         "${META_DOC}" \
+        "${SIG_ASSET[@]}" \
         "${OUT_DIR}/SHA256SUMS.txt"
     log "GitHub release v${TAG_VERSION}: published (${REPO_URL}/releases/tag/v${TAG_VERSION})"
 fi

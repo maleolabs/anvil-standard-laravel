@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // ValidateDocumentShape asserts that a derived metadata document satisfies
@@ -182,7 +183,7 @@ func ValidateVersionMatch(declared, manifestVersion string) error {
 // characters, no userinfo (mirrors Core parse.go checkHTTPSURL).
 func checkHTTPSLocation(location string) error {
 	for _, r := range location {
-		if r < 0x20 || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		if r < 0x20 || unicode.IsSpace(r) {
 			return fmt.Errorf("must not contain whitespace or control characters — the location is a resolvable https URL, not free text")
 		}
 	}

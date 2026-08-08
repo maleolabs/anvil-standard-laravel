@@ -117,6 +117,7 @@ the test index document if one was ever published for that version).
 |---|---|
 | `anvil-standard-laravel-<version>.tar.gz` | The release content: platform binaries + standard parts; the content `distribution.location` resolves and `trust.contentDigests` covers |
 | `registry-metadata-<version>.json` | The registry metadata document of this release (discoverable, installable through the registry flow) |
+| `registry-metadata-<version>.json.sig` | The DETACHED Ed25519 signature over the raw metadata document bytes (F-1), published only when signing with a STABLE key; the bootstrap installer verifies it with its pinned publisher key before trusting the document's digests |
 | `SHA256SUMS.txt` | Checksums of every asset (same-channel fallback material for adopters without the attestation path) |
 | `binaries/anvil-adapter-laravel-<os>-<arch>` | The standard executable per release platform |
 
@@ -141,10 +142,22 @@ the test index document if one was ever published for that version).
   — the exact composition the Anvil Runtime registry client verifies
   byte-for-byte (Core `internal/registry/trust.go`; PM decision D-01) —
   plus the publisher's base64 verification public key. Because the payload
-  concatenates EVERY declared digest in array order, the signature binds
-  the archive AND each binary asset: a same-channel attacker who swaps a
-  binary (and its checksum entry) cannot adjust the named digest without
-  the signing key.
+  concatenates EVERY declared digest in array order — each named entry
+  contributing `utf8(name) || 0x00 || digest bytes` (security review
+  F-2) — the signature binds the archive AND each binary asset AND the
+  asset NAME: a same-channel attacker who swaps a binary (and its
+  checksum entry) cannot adjust the named digest, strip the name (to
+  force the checksum fallback), or rename it across assets without the
+  signing key.
+
+  The pipeline additionally publishes a DETACHED signature over the RAW
+  metadata document bytes (`registry-metadata-<version>.json.sig`,
+  security review F-1) when signing with a STABLE key
+  (`RELEASE_SIGNING_KEY` / `--key`): the bootstrap installer
+  (install.sh) verifies it against its pinned publisher key before
+  trusting any digest inside the document. Release-time-generated keys
+  ship no `.sig` — nothing could verify them out of band, and a stray
+  signature would fail installs closed.
 - **What the attestation actually guarantees.** The Ed25519 signature
   proves the release was signed by the holder of the declared public key
   and that the declared claims (id, version, content digests) are bound

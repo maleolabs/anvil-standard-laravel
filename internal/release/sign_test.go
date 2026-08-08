@@ -473,3 +473,133 @@ func TestVerifyBinaryAssetDigests_MissingAndUndeclaredAssets(t *testing.T) {
 		t.Fatalf("declared asset without a file must fail, got: %v", err)
 	}
 }
+
+// ── Asset names are signed material (security review F-2) ───────────
+
+// TestAttestationPayload_NamedEntryComposition asserts each NAMED entry
+// contributes utf8(name) || 0x00 || decoded digest bytes to the canonical
+// payload — the byte-exact composition fixed by registry-metadata.md §4.7
+// and mirrored byte-for-byte by the Core registry client
+// (internal/registry/trust.go attestationPayload).
+func TestAttestationPayload_NamedEntryComposition(t *testing.T) {
+	d1 := strings.Repeat("0", 64) // 32 x 0x00
+	d2 := strings.Repeat("1", 64) // 32 x 0x11
+	payload, err := AttestationPayload("anvil-standard-laravel", "1.0.0", []ContentDigest{
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: d1},
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: d2, Name: "anvil-adapter-laravel-linux-amd64"},
+	})
+	if err != nil {
+		t.Fatalf("AttestationPayload: %v", err)
+	}
+
+	want := []byte("anvil-standard-laravel")
+	want = append(want, 0x00)
+	want = append(want, "1.0.0"...)
+	want = append(want, 0x00)
+	want = append(want, bytes.Repeat([]byte{0x00}, 32)...)
+	want = append(want, "anvil-adapter-laravel-linux-amd64"...)
+	want = append(want, 0x00)
+	want = append(want, bytes.Repeat([]byte{0x11}, 32)...)
+	if !bytes.Equal(payload, want) {
+		t.Fatalf("payload composition mismatch:\n got %x\nwant %x", payload, want)
+	}
+}
+
+// TestVerifyAttestation_NameStripAndRenameInvalidate asserts the F-2
+// property end-to-end: mutating a signed entry's name (stripping it or
+// renaming it across assets) changes the payload, so the signature no
+// longer verifies — the publisher's key cannot be replayed over the
+// modified claims.
+func TestVerifyAttestation_NameStripAndRenameInvalidate(t *testing.T) {
+	dir := t.TempDir()
+	privPath := filepath.Join(dir, "key.pem")
+	pubPath := filepath.Join(dir, "key.pub.pem")
+	pubB64, err := GenerateKeyPair(privPath, pubPath)
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	priv, err := LoadPrivateKey(privPath)
+	if err != nil {
+		t.Fatalf("LoadPrivateKey: %v", err)
+	}
+
+	contentDigests := []ContentDigest{
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("archive"))},
+		{Algorithm: DigestAlgorithmSHA256, Encoding: DigestEncodingBase16, Digest: SHA256Base16([]byte("binary")), Name: "anvil-adapter-laravel-linux-amd64"},
+	}
+	payload, err := AttestationPayload("anvil-standard-laravel", "1.0.0", contentDigests)
+	if err != nil {
+		t.Fatalf("AttestationPayload: %v", err)
+	}
+	doc := DeriveDocument(
+		&SourceManifest{ID: "anvil-standard-laravel", Version: "1.0.0", ContractVersion: "1.0.0", Capability: Capability{FrameworkVersion: []string{"10.0.0", "11.0.0", "12.0.0"}}},
+		"1.0.0",
+		"https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.0.0/anvil-standard-laravel-1.0.0.tar.gz",
+		contentDigests, SignAttestation(payload, priv), pubB64,
+	)
+	if err := VerifyAttestation(doc); err != nil {
+		t.Fatalf("pristine attestation must verify: %v", err)
+	}
+
+	// Name STRIP: the digest bytes stay in the payload, but the name
+	// prefix disappears — the signature must break (the F-2 attack).
+	stripped := *doc
+	stripped.Trust.ContentDigests[1].Name = ""
+	if err := VerifyAttestation(&stripped); err == nil {
+		t.Fatal("attestation must fail when a signed asset name is stripped (F-2)")
+	}
+
+	// Name RENAME across assets: the signed name bytes change.
+	renamed := *doc
+	renamed.Trust.ContentDigests[1].Name = "anvil-adapter-flutter-linux-amd64"
+	if err := VerifyAttestation(&renamed); err == nil {
+		t.Fatal("attestation must fail when a signed asset name is renamed (F-2)")
+	}
+}
+
+// ── Detached document signature (security review F-1) ───────────────
+
+// TestSignAndVerifyDocumentSignature asserts the detached signature over
+// the RAW document bytes: byte-exact signing (a single changed byte
+// invalidates), distinct from the canonical-payload attestation.
+func TestSignAndVerifyDocumentSignature(t *testing.T) {
+	dir := t.TempDir()
+	privPath := filepath.Join(dir, "key.pem")
+	pubPath := filepath.Join(dir, "key.pub.pem")
+	pubB64, err := GenerateKeyPair(privPath, pubPath)
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	priv, err := LoadPrivateKey(privPath)
+	if err != nil {
+		t.Fatalf("LoadPrivateKey: %v", err)
+	}
+
+	docBytes := []byte(`{"id":"anvil-standard-laravel","version":"1.0.0","trust":{"contentDigests":[{"algorithm":"sha-256","encoding":"base16","digest":"1111111111111111111111111111111111111111111111111111111111111111","name":"anvil-adapter-laravel-linux-amd64"}],"attestation":{"algorithm":"ed25519","signature":"x","publicKey":"y"}}}`)
+	sig := SignDocumentBytes(docBytes, priv)
+	if decoded := mustDecode(t, sig); len(decoded) != 64 {
+		t.Fatalf("detached signature must be 64 bytes, got %d", len(decoded))
+	}
+	if err := VerifyDocumentSignature(docBytes, sig, pubB64); err != nil {
+		t.Fatalf("VerifyDocumentSignature: %v", err)
+	}
+
+	// Byte-level tamper of the document invalidates the signature.
+	tampered := append(append([]byte(nil), docBytes...), '\n')
+	if err := VerifyDocumentSignature(tampered, sig, pubB64); err == nil {
+		t.Fatal("detached signature must fail when the document bytes change")
+	}
+
+	// A different key cannot verify.
+	otherDir := t.TempDir()
+	if _, err := GenerateKeyPair(filepath.Join(otherDir, "k.pem"), filepath.Join(otherDir, "k.pub.pem")); err != nil {
+		t.Fatal(err)
+	}
+	otherPriv, err := LoadPrivateKey(filepath.Join(otherDir, "k.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDocumentSignature(docBytes, SignDocumentBytes(docBytes, otherPriv), pubB64); err == nil {
+		t.Fatal("detached signature with a different key must not verify")
+	}
+}
