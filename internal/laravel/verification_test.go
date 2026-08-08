@@ -598,6 +598,51 @@ func TestRunVerification_SharedResourceWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("pass_no_env_store_reports_drift_not_recheckable", func(t *testing.T) {
+		// The normal production shape: the artifact .env carries no
+		// CACHE_STORE (the real .env is shared-linked on the server),
+		// the compiled config cache is present. The runtime store is
+		// verified and wired, but the declared-vs-runtime comparison
+		// never happened — the outcome must say so, not claim a match.
+		artifactPath := writeArtifactContents(t, map[string]string{
+			"config/cache.php":           cacheConfigFixture,
+			"bootstrap/cache/config.php": compiledConfigFixture,
+		})
+		outcome := RunVerification(contracts.VerificationRequest{Check: CheckSharedResourceWiring, ArtifactPath: artifactPath})
+		if !outcome.Passed {
+			t.Errorf("Passed = false, want true (outcome: %#v)", outcome)
+		}
+		for _, want := range []string{`"file"`, "wired", "not re-checkable from the artifact", "shared-linked at install"} {
+			if !strings.Contains(outcome.Details, want) {
+				t.Errorf("Details = %q, want it to contain %q", outcome.Details, want)
+			}
+		}
+		if strings.Contains(outcome.Details, "matches the declared store") {
+			t.Errorf("Details = %q, must not claim a declared-vs-runtime match that was not verified", outcome.Details)
+		}
+	})
+
+	t.Run("fail_compiled_present_but_unextractable", func(t *testing.T) {
+		// The compiled config cache exists yet its cache default cannot
+		// be extracted (double-quoted shape the parser does not read):
+		// fail closed instead of silently falling back to the declared
+		// store — the evidence is not re-checkable.
+		artifactPath := writeArtifactContents(t, map[string]string{
+			".env":                       "CACHE_STORE=file\n",
+			"config/cache.php":           cacheConfigFixture,
+			"bootstrap/cache/config.php": `<?php return array ( 'cache' => array ( "default" => "file", ), );`,
+		})
+		outcome := RunVerification(contracts.VerificationRequest{Check: CheckSharedResourceWiring, ArtifactPath: artifactPath})
+		if outcome.Passed {
+			t.Errorf("Passed = true, want false (outcome: %#v)", outcome)
+		}
+		for _, want := range []string{"bootstrap/cache/config.php", "not re-checkable"} {
+			if !strings.Contains(outcome.Details, want) {
+				t.Errorf("Details = %q, want it to contain %q", outcome.Details, want)
+			}
+		}
+	})
+
 	t.Run("fail_declared_store_drifts_from_compiled", func(t *testing.T) {
 		// .env declares redis, the compiled config cache — what the
 		// release actually runs with after config:cache — says file.
@@ -791,12 +836,18 @@ func TestRunVerification_MigrationTiming(t *testing.T) {
 // TestQueueRestartSignalPath pins the file-cache path of the queue
 // restart signal: Laravel's FileStore::path derivation (sha1 of the key,
 // two two-character directory levels, file named by the full hash) under
-// storage/framework/cache/data. The pinned value is the re-checkable
-// evidence location of the queue_restart check.
+// storage/framework/cache/data. The key is `illuminate:queue:restart`
+// (Laravel 10/11/12 RestartCommand) with no cache prefix (Laravel
+// 10/11/12 file stores carry no prefix — Repository::itemKey returns the
+// bare key). The pinned value is the re-checkable evidence location of
+// the queue_restart check.
 func TestQueueRestartSignalPath(t *testing.T) {
-	want := "storage/framework/cache/data/68/05/680501494cbbcedd56c897bac4b527faa882d3a5"
+	want := "storage/framework/cache/data/ee/2f/ee2f842aa7bb1f53edf3a2ed2c09a1807ffa6c90"
 	if got := queueRestartSignalPath(); got != want {
 		t.Errorf("queueRestartSignalPath() = %q, want %q", got, want)
+	}
+	if queueRestartCacheKey != "illuminate:queue:restart" {
+		t.Errorf("queueRestartCacheKey = %q, want %q", queueRestartCacheKey, "illuminate:queue:restart")
 	}
 }
 
@@ -848,7 +899,45 @@ func TestRunVerification_QueueRestart(t *testing.T) {
 		if !outcome.Passed {
 			t.Errorf("Passed = false, want true (outcome: %#v)", outcome)
 		}
-		for _, want := range []string{"redis", "laravel_database_queues_restart", "external to the release directory"} {
+		for _, want := range []string{"redis", "illuminate:queue:restart", "external to the release directory", "known driver"} {
+			if !strings.Contains(outcome.Details, want) {
+				t.Errorf("Details = %q, want it to contain %q", outcome.Details, want)
+			}
+		}
+	})
+
+	t.Run("fail_unknown_store", func(t *testing.T) {
+		// An unknown store fails closed — the evidence location cannot
+		// be re-checked from a store the standard does not know.
+		artifactPath := writeArtifactContents(t, map[string]string{
+			".env":             "CACHE_STORE=banana\n",
+			"config/cache.php": cacheConfigFixture,
+		})
+		outcome := RunVerification(contracts.VerificationRequest{Check: CheckQueueRestart, ArtifactPath: artifactPath})
+		if outcome.Passed {
+			t.Errorf("Passed = true, want false (outcome: %#v)", outcome)
+		}
+		for _, want := range []string{"banana", "not a known Laravel cache store"} {
+			if !strings.Contains(outcome.Details, want) {
+				t.Errorf("Details = %q, want it to contain %q", outcome.Details, want)
+			}
+		}
+	})
+
+	t.Run("fail_compiled_present_but_unextractable", func(t *testing.T) {
+		// The compiled config cache exists yet its cache default cannot
+		// be extracted (double-quoted shape the parser does not read):
+		// fail closed — the evidence is not re-checkable.
+		artifactPath := writeArtifactContents(t, map[string]string{
+			".env":                       "CACHE_STORE=file\n",
+			"config/cache.php":           cacheConfigFixture,
+			"bootstrap/cache/config.php": `<?php return array ( 'cache' => array ( "default" => "file", ), );`,
+		})
+		outcome := RunVerification(contracts.VerificationRequest{Check: CheckQueueRestart, ArtifactPath: artifactPath})
+		if outcome.Passed {
+			t.Errorf("Passed = true, want false (outcome: %#v)", outcome)
+		}
+		for _, want := range []string{"bootstrap/cache/config.php", "not re-checkable"} {
 			if !strings.Contains(outcome.Details, want) {
 				t.Errorf("Details = %q, want it to contain %q", outcome.Details, want)
 			}
@@ -984,6 +1073,53 @@ func TestRunVerification_RollbackBehavior(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestEnvValue verifies the minimal .env parser used by the
+// lifecycle-conformity checks: surrounding quotes, inline comments, and
+// the export form (TS-018-03-01 review L-2).
+func TestEnvValue(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "plain", env: "CACHE_STORE=file\n", want: "file"},
+		{name: "export_form", env: "export CACHE_STORE=redis\n", want: "redis"},
+		{name: "double_quoted", env: `CACHE_STORE="file"` + "\n", want: "file"},
+		{name: "single_quoted", env: "CACHE_STORE='redis'\n", want: "redis"},
+		{name: "inline_comment", env: "CACHE_STORE=file # the shared store\n", want: "file"},
+		{name: "hash_in_quotes_kept", env: `CACHE_STORE="file#x"` + "\n", want: "file#x"},
+		{name: "comment_line_skipped", env: "# CACHE_STORE=old\nCACHE_STORE=file\n", want: "file"},
+		{name: "absent", env: "APP_ENV=production\n", want: ""},
+		{name: "empty_value", env: "CACHE_STORE=\n", want: ""},
+		{name: "leading_spaces", env: "  CACHE_STORE = redis\n", want: "redis"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := envValue([]byte(tt.env), "CACHE_STORE"); got != tt.want {
+				t.Errorf("envValue(%q, CACHE_STORE) = %q, want %q", tt.env, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestArtifactReadFile_EvidenceLimit verifies the evidence read bound:
+// an archive entry beyond the limit is an error, never a silent
+// truncation that would make partial content look like re-checkable
+// evidence (TS-018-03-01 review L-1).
+func TestArtifactReadFile_EvidenceLimit(t *testing.T) {
+	oversized := strings.Repeat("x", maxEvidenceFileSize+1)
+	artifactPath := writeArtifactArchiveContents(t, map[string]string{
+		".env": oversized,
+	})
+	_, found, err := artifactReadFile(artifactPath, ".env")
+	if err == nil {
+		t.Fatalf("artifactReadFile = (found=%v, err=nil), want an evidence limit error", found)
+	}
+	if !strings.Contains(err.Error(), "evidence read limit") {
+		t.Errorf("err = %q, want it to mention the evidence read limit", err.Error())
+	}
 }
 
 // TestRunVerification_UnknownCheck verifies that an undeclared check

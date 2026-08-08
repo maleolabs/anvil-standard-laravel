@@ -10,6 +10,14 @@ This document is the human-readable form of the executable checks in
 [`internal/laravel/verification.go`](../internal/laravel/verification.go);
 the Go code is the single source of truth.
 
+The verification positions are fixed by the lifecycle specification, the
+checks executing there are declared content (command-contract.md §4.2:
+`prepare → configure → framework phases → verify → promote`): the
+structural checks run at release install; the lifecycle-conformity
+checks run at the **post-activation verify stage**, immediately before
+the atomic promotion — exactly when the release directory carries the
+post-activation evidence they inspect.
+
 ## Checks
 
 The standard declares **twelve verification checks** in its capability
@@ -35,10 +43,10 @@ pass/fail outcome (`name`, `passed`, `details`).
 
 | # | Check | Validates | Rule |
 |---|---|---|---|
-| 9 | `shared_resource_wiring` | The shared cache store the release declares (`.env` `CACHE_STORE`, else the `config/cache.php` default) equals the store the release runs with (the compiled config cache default after activation), and the runtime store is wired in the `config/cache.php` stores map | The shared resource is wired for the release; a declared store that drifts from the compiled configuration is a mis-wired release |
+| 9 | `shared_resource_wiring` | The shared cache store the release declares (`.env` `CACHE_STORE`, else the `config/cache.php` default) equals the store the release runs with (the compiled config cache default after activation) when **both** are re-checkable from the artifact, and the runtime store is a known driver wired in the `config/cache.php` stores map | The shared resource is wired for the release; a declared store that drifts from the compiled configuration is a mis-wired release; when the artifact `.env` carries no `CACHE_STORE` (production shape — the real `.env` is shared-linked on the server) the outcome states the comparison is not re-checkable instead of claiming a match |
 | 10 | `migration_timing` | Re-checkable post-promotion migration evidence: the compiled config cache (the post-activation marker) is present and the migration set exists at the declared migrations path (`database/migrations`) | Migrations ran at the declared **post-promotion** timing (`post_promotion`, [lifecycle/definition.md](../lifecycle/definition.md)): the release carries the post-activation state and the migration set the phase applies |
-| 11 | `queue_restart` | The queue restart signal (cache key `laravel_database_queues_restart`) is present in the release's file cache store when the store is `file`; for any other store the evidence location is the shared store, declared in the outcome | The queue was restarted after activation (`queue:restart`, the last declared activation phase) |
-| 12 | `rollback_behavior` | Every activation phase declares rollback coverage (a rollback command when reversible, the irreversible marker when not), the migration rollback is the force-confirmed `migrate:rollback --force`, and the manifest rollback metadata matches the executable phase table | Rollback produces the declared state; irreversible phases never block rollback |
+| 11 | `queue_restart` | The queue restart signal (cache key `illuminate:queue:restart` — Laravel 10/11/12 `RestartCommand`) is present in the release's file cache store when the store is `file`; for any other **known** driver the evidence location is the shared store, declared in the outcome; an unknown store fails closed | The queue was restarted after activation (`queue:restart`, the last declared activation phase) |
+| 12 | `rollback_behavior` | Every activation phase declares rollback coverage (a rollback command when reversible, the irreversible marker when not), the migration rollback is the force-confirmed `migrate:rollback --force`, and the manifest rollback metadata matches the executable phase table — a **standard-internal drift guard** (executable table vs manifest command surface of the same binary), not artifact manifest (ADR-017) evidence | Rollback produces the declared state; irreversible phases never block rollback |
 
 ## Semantics
 
@@ -82,12 +90,20 @@ default `file`). The check resolves three artifact-embedded facts:
 3. The **wiring**: the store keys declared in the `config/cache.php`
    `stores` map.
 
-The check fails when the declared store differs from the runtime store
-(after `config:cache`, Laravel serves the compiled value, not `.env` —
-the classic "declared redis, running file" drift), when the runtime
-store is not a known Laravel driver, or when the runtime store has no
-entry in the `stores` map (not wired). A release without
-`config/cache.php` cannot be re-checked and fails closed.
+The check fails when both the declared and the runtime store are
+re-checkable from the artifact and differ (after `config:cache`, Laravel
+serves the compiled value, not `.env` — the classic "declared redis,
+running file" drift), when the runtime store is not a known Laravel
+driver, or when the runtime store has no entry in the `stores` map (not
+wired). When the artifact `.env` carries no `CACHE_STORE` — the normal
+production shape, where the real `.env` is shared-linked on the server at
+install — the declared-vs-runtime comparison is **not re-checkable**: the
+check verifies and reports the runtime store's wiring and states the
+comparison could not be made; it never claims a match that was not
+verified. A release without `config/cache.php` cannot be re-checked and
+fails closed, and a compiled config cache whose cache default cannot be
+extracted fails closed (evidence exists but is not re-checkable — never
+a silent fallback to the declared store).
 
 **`migration_timing`.** The standard declares migrations as the **first**
 activation phase at **post-promotion** timing (`MigrationTiming()` →
@@ -105,19 +121,22 @@ evidence merge into the runtime's verification report as re-checkable
 lifecycle evidence.
 
 **`queue_restart`.** The standard declares `queue:restart` as the last
-activation phase; Laravel writes the restart signal to the shared cache
-store under the key `laravel_database_queues_restart`. With the `file`
+activation phase; Laravel's `RestartCommand` writes the restart signal to
+the shared cache store under the key `illuminate:queue:restart` on every
+framework version in the support scope (Laravel 10/11/12 — the legacy
+`laravel_database_queues_restart` shape is Laravel ≤8). With the `file`
 store — the standard's declared default shared store — the signal is a
 file inside the release's file cache store
-(`storage/framework/cache/data/…`, path derived from sha1 of the key
-exactly like Laravel's `FileStore::path`) and the check verifies it
-directly. With any other store the signal lives in that shared store,
-external to the release directory: the check verifies the store
-determination and declares the evidence location (store + key) in the
-outcome — the recorded `queue_restart` activation outcome is the
-runtime's lifecycle evidence there, and the signal is re-checkable in
-the shared store. When the store cannot be determined the check fails
-closed.
+(`storage/framework/cache/data/…`, path derived from sha1 of the bare key
+exactly like Laravel's `FileStore::path`; Laravel 10/11/12 file stores
+carry no cache prefix) and the check verifies it directly. With any other
+**known** store the signal lives in that shared store, external to the
+release directory: the check verifies the store determination and
+declares the evidence location (store + key) in the outcome — the
+recorded `queue_restart` activation outcome is the runtime's lifecycle
+evidence there, and the signal is re-checkable in the shared store. When
+the store cannot be determined, or is not a known Laravel driver, the
+check fails closed — the evidence location cannot be re-checked.
 
 **`rollback_behavior`.** The check verifies that rollback produces the
 declared state ([lifecycle/definition.md](../lifecycle/definition.md)):
@@ -129,7 +148,12 @@ declared force-confirmed `migrate:rollback --force` (non-interactive
 production rollback would otherwise be cancelled by Laravel's
 `ConfirmableTrait`); and the manifest rollback metadata
 (`RollbackCommands()`) matches the executable phase table — the two
-surfaces must not diverge. The outcome reports the derived per-phase
+surfaces must not diverge. This is a **standard-internal drift guard**:
+it compares the executable phase table with the manifest command surface
+of the same standard binary, catching internal divergence (e.g. a future
+change that drops `--force` from one surface). It does **not** read the
+artifact's embedded manifest (ADR-017) — that manifest is not part of
+this check's evidence. The outcome reports the derived per-phase
 rollback table, which any consumer can re-derive from the declared phase
 table.
 
@@ -154,7 +178,11 @@ transformation.
   stores-map entries), the compiled `bootstrap/cache/config.php`, and
   the default file-store path `storage/framework/cache/data`. Projects
   that heavily customize these shapes may produce outcomes the check
-  cannot parse — the check fails closed rather than guessing.
+  cannot parse — the check fails closed rather than guessing. A
+  compiled config cache that is present yet unparseable (e.g. a
+  double-quoted shape) fails closed: the evidence exists but is not
+  re-checkable, so the check never silently falls back to the declared
+  store.
 - `migration_timing` verifies the standard's default declared migrations
   path (`database/migrations`); a project that overrides
   `framework.laravel.migrations.path` with a custom value cannot be
@@ -163,3 +191,8 @@ transformation.
 - `queue_restart` verifies the file-store signal at the default file
   cache path; a customized file-store path is not re-checkable from the
   artifact.
+- `rollback_behavior` is a standard-internal drift guard: it validates
+  the declared rollback semantics of the standard's own surfaces (phase
+  table vs manifest command metadata). It does not read the artifact's
+  embedded manifest (ADR-017) — artifact-manifest verification is the
+  runtime's integrity gate, not this check's evidence.

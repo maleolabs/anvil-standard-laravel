@@ -32,7 +32,7 @@ The standard declares its identity and capability surface in the
 | **Framework-version support scope** | Laravel `10.0.0`, `11.0.0`, `12.0.0` |
 | **Deployment model** | `server` — releases deploy to a server and are activated in place |
 | **Activation phases** | `migrate`, `config_cache`, `route_cache`, `event_cache`, `queue_restart` |
-| **Verification checks** | 8 structural checks (see [Verification](#6-what-verification-checks)) |
+| **Verification checks** | 12 checks — 8 structural + 4 lifecycle-conformity (see [Verification](#6-what-verification-checks)) |
 | **Config extensions** | 5 keys under `framework.laravel.*` (see [Configuration surface](#7-configuration-surface)) |
 
 Compatibility is validated **at adoption** — the registry rejects a
@@ -110,7 +110,7 @@ anvil server project register \
   --adapter laravel \
   --non-interactive
 
-# 6. Install the artifact as a Release (runs the 12 verification checks)
+# 6. Install the artifact as a Release (runs the 8 structural verification checks)
 anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 
 # 7. Activate the Release (runs the 5 activation phases)
@@ -156,15 +156,18 @@ Key semantics (full detail in the [Lifecycle Definition](../lifecycle/definition
 
 ## 6. What verification checks
 
-Release install runs the standard's **12 verification checks** against
-the artifact — all must pass or the install fails (see
-[docs/verify.md](verify.md) and [verification/checks.md](../verification/checks.md)):
+The standard's **12 verification checks** split across two lifecycle
+positions (see [docs/verify.md](verify.md) and
+[verification/checks.md](../verification/checks.md)):
 
-**Structural (8, the preserved v1.x surface):**
+**Structural (8, at release install — the preserved v1.x surface):**
 `vendor_present` · `bootstrap_structure` · `config_files` · `artisan_file`
 · `composer_json` · `env_file` · `app_directory` · `routes_directory`
 
-**Lifecycle-conformity (4, TS-018-03-01):**
+**Lifecycle-conformity (4, at the post-activation verify stage —**
+command-contract.md §4.2: `prepare → configure → framework phases →
+verify → promote` — where the release directory carries the
+post-activation evidence):
 `shared_resource_wiring` · `migration_timing` · `queue_restart` ·
 `rollback_behavior`
 

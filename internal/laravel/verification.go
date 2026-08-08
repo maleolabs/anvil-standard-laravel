@@ -369,16 +369,22 @@ func archiveContainsDir(archivePath, relPath string) (bool, error) {
 // ---------------------------------------------------------------------------
 
 // queueRestartCacheKey is the cache key `php artisan queue:restart`
-// writes its restart timestamp to (Laravel's QueueRestart signal, keyed
-// per queue connection).
-const queueRestartCacheKey = "laravel_database_queues_restart"
+// writes its restart timestamp to. Laravel's RestartCommand
+// (Illuminate\Queue\Console\RestartCommand::handle) writes the key
+// `illuminate:queue:restart` on every supported framework version in the
+// standard's support scope (Laravel 10/11/12); the legacy
+// `laravel_database_queues_restart` shape is Laravel ≤8 and must not be
+// used.
+const queueRestartCacheKey = "illuminate:queue:restart"
 
 // queueRestartSignalPath returns the file-cache path of the queue restart
 // signal inside the release, derived the way Laravel's FileStore::path
 // derives it: the sha1 of the cache key, hex-encoded, split into two
 // two-character directory levels, the file named by the full hash, under
 // storage/framework/cache/data (the Laravel default path of the file
-// cache store).
+// cache store). Laravel 10/11/12 file stores carry no cache prefix —
+// Repository::itemKey returns the bare key and FileStore::getPrefix is
+// empty — so the sha1 input is the bare key.
 func queueRestartSignalPath() string {
 	sum := sha1.Sum([]byte(queueRestartCacheKey))
 	h := hex.EncodeToString(sum[:])
@@ -456,7 +462,17 @@ func resolveCacheStoreEvidence(artifactPath string) (cacheStoreEvidence, error) 
 	}
 	if found {
 		ev.compiledPresent = true
-		ev.runtimeUsedStore = compiledConfigCacheDefault(compiledData)
+		compiledDefault, ok := compiledConfigCacheDefault(compiledData)
+		if !ok {
+			// The compiled config cache is present but its cache
+			// default is not extractable: the evidence exists yet
+			// cannot be re-checked — fail closed instead of silently
+			// falling back to the declared store (E5: evidence that
+			// cannot be re-checked is invalid).
+			return ev, fmt.Errorf(
+				"bootstrap/cache/config.php is present but its cache default cannot be extracted: the cache-store evidence is not re-checkable")
+		}
+		ev.runtimeUsedStore = compiledDefault
 	}
 	if ev.runtimeUsedStore == "" {
 		ev.runtimeUsedStore = ev.declaredStore
@@ -465,13 +481,18 @@ func resolveCacheStoreEvidence(artifactPath string) (cacheStoreEvidence, error) 
 }
 
 // envValue returns the value of the first KEY=VALUE assignment in a
-// Laravel .env file. Lines are "KEY=VALUE"; surrounding single or double
-// quotes are stripped; an empty or commented value counts as unset. The
-// parser is deliberately minimal — it reads the CACHE_STORE declaration,
-// not the full Dotenv grammar.
+// Laravel .env file. Lines are "KEY=VALUE" (optionally "export KEY=
+// VALUE"); surrounding single or double quotes are stripped, an inline
+// comment preceded by whitespace is stripped from unquoted values, and
+// an empty or commented value counts as unset. The parser is
+// deliberately minimal — it reads the CACHE_STORE declaration, not the
+// full Dotenv grammar.
 func envValue(data []byte, key string) string {
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -480,10 +501,17 @@ func envValue(data []byte, key string) string {
 			continue
 		}
 		value := strings.TrimSpace(line[eq+1:])
+		quoted := false
 		if len(value) >= 2 {
 			if (value[0] == '"' && value[len(value)-1] == '"') ||
 				(value[0] == '\'' && value[len(value)-1] == '\'') {
 				value = value[1 : len(value)-1]
+				quoted = true
+			}
+		}
+		if !quoted {
+			if idx := strings.Index(value, "#"); idx > 0 && isConfigSpace(value[idx-1]) {
+				value = strings.TrimSpace(value[:idx])
 			}
 		}
 		return value
@@ -514,17 +542,40 @@ func configDefaultStore(data []byte) string {
 // file's keys under its own section (`'cache' => array ( 'default' =>
 // 'file', ... )`), so the value is read from the cache section only —
 // other sections (e.g. database) also carry a top-level 'default' key
-// and must not shadow it.
-func compiledConfigCacheDefault(data []byte) string {
+// and must not shadow it. The bool reports whether the default was
+// extracted; a present-but-unextractable cache section is a fail-closed
+// condition (the evidence cannot be re-checked), never a silent
+// fallback.
+func compiledConfigCacheDefault(data []byte) (string, bool) {
 	text := string(data)
 	idx := cacheSectionPattern.FindStringIndex(text)
 	if idx == nil {
-		return ""
+		return "", false
 	}
-	if m := configDefaultLiteralPattern.FindStringSubmatch(text[idx[0]:]); m != nil {
-		return m[1]
+	// Bound the search to the cache section itself: everything from its
+	// opening bracket (already consumed by cacheSectionPattern) until
+	// the bracket depth returns to zero. A later section's 'default'
+	// key must never satisfy the extraction.
+	block := text[idx[0]:]
+	depth := 0
+	end := len(block)
+	for i := 0; i < len(block); i++ {
+		switch block[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				end = i
+				i = len(block)
+			}
+		}
 	}
-	return ""
+	m := configDefaultLiteralPattern.FindStringSubmatch(block[:end])
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 // configStores returns the store keys declared in the stores map of a
@@ -624,12 +675,17 @@ var (
 )
 
 // checkSharedResourceWiring implements CheckSharedResourceWiring: the
-// store the release declares must be the store the release runs with,
-// and the runtime store must be wired in the release's config/cache.php
-// stores map. A declared store that drifts from the compiled config
-// cache (bootstrap/cache/config.php) is a mis-wired release: after
-// config:cache, Laravel serves the compiled value, not .env — the
-// classic "declared redis, running file" incident.
+// shared cache store must be wired for the release — the runtime store
+// (the compiled config cache default after activation) must be a known
+// Laravel driver present in the config/cache.php stores map. When both
+// the declared store and the runtime store are re-checkable from the
+// artifact (.env carries CACHE_STORE and the compiled config cache is
+// present), they must match: after config:cache, Laravel serves the
+// compiled value, not .env — the classic "declared redis, running file"
+// incident. When the artifact .env carries no CACHE_STORE (the normal
+// production shape — the real .env is shared-linked on the server), the
+// declared-vs-runtime comparison is not re-checkable and the outcome
+// says so instead of claiming a match that never happened.
 //
 // Reference: TS-018-03-01, Review 19 §3.3
 func checkSharedResourceWiring(artifactPath string) contracts.VerificationOutcome {
@@ -656,9 +712,28 @@ func checkSharedResourceWiring(artifactPath string) contracts.VerificationOutcom
 			ev.runtimeUsedStore, ev.runtimeUsedStore, strings.Join(ev.stores, ", ")))
 	}
 
-	return passOutcome(CheckSharedResourceWiring, fmt.Sprintf(
-		"shared cache store wired for the release: runtime store %q matches the declared store %q and is present in the config/cache.php stores map (stores: %s)",
-		ev.runtimeUsedStore, ev.declaredStore, strings.Join(ev.stores, ", ")))
+	switch {
+	case ev.compiledPresent && ev.envStore != "":
+		return passOutcome(CheckSharedResourceWiring, fmt.Sprintf(
+			"shared cache store wired for the release: runtime store %q (bootstrap/cache/config.php) matches the declared store %q (CACHE_STORE in .env) and is present in the config/cache.php stores map (stores: %s)",
+			ev.runtimeUsedStore, ev.declaredStore, strings.Join(ev.stores, ", ")))
+	case ev.compiledPresent:
+		// The artifact .env carries no CACHE_STORE — the normal
+		// production shape, where the real .env is shared-linked on the
+		// server at install. The runtime store is verified and wired;
+		// the declared-vs-runtime comparison is not re-checkable here,
+		// and the outcome does not claim it.
+		return passOutcome(CheckSharedResourceWiring, fmt.Sprintf(
+			"shared cache store wired for the release: runtime store %q (bootstrap/cache/config.php) is present in the config/cache.php stores map (stores: %s); CACHE_STORE is not declared in the artifact .env (the production .env is shared-linked at install), so declared-vs-runtime drift is not re-checkable from the artifact",
+			ev.runtimeUsedStore, strings.Join(ev.stores, ", ")))
+	default:
+		// No compiled config cache — a pre-activation artifact: the
+		// runtime store is derived from the declared store, not
+		// compared against it.
+		return passOutcome(CheckSharedResourceWiring, fmt.Sprintf(
+			"no compiled config cache in the release (pre-activation artifact): runtime store %q derived from the declared store %q (config/cache.php default or CACHE_STORE in .env) and present in the config/cache.php stores map (stores: %s)",
+			ev.runtimeUsedStore, ev.declaredStore, strings.Join(ev.stores, ", ")))
+	}
 }
 
 // checkMigrationTiming implements CheckMigrationTiming: re-checkable
@@ -719,12 +794,14 @@ func checkMigrationTiming(artifactPath string) contracts.VerificationOutcome {
 // that the queue was restarted after activation. `php artisan
 // queue:restart` (the last declared activation phase) writes the restart
 // signal into the shared cache store under the key
-// laravel_database_queues_restart. With the file store — the standard's
-// declared default shared store (framework.laravel.cache.store) — the
-// signal is a file inside the release's file cache store and is verified
-// directly; with any other store the signal lives in that shared store,
-// external to the release directory, and the check verifies the store
-// determination and declares the evidence location.
+// illuminate:queue:restart (Laravel's RestartCommand, Laravel 10/11/12).
+// With the file store — the standard's declared default shared store
+// (framework.laravel.cache.store) — the signal is a file inside the
+// release's file cache store and is verified directly; with any other
+// known store the signal lives in that shared store, external to the
+// release directory, and the check verifies the store determination and
+// declares the evidence location. An unknown store fails the check
+// closed — the evidence cannot be re-checked.
 //
 // Reference: TS-018-03-01, Review 19 §3.3, TS-018-01-01
 func checkQueueRestart(artifactPath string) contracts.VerificationOutcome {
@@ -737,9 +814,18 @@ func checkQueueRestart(artifactPath string) contracts.VerificationOutcome {
 			"cannot determine the cache store of the release: no CACHE_STORE in .env and no default in config/cache.php")
 	}
 
+	// Fail closed on unknown stores: the evidence location cannot be
+	// re-checked from a store the standard does not know (consistent
+	// with shared_resource_wiring).
+	if !slices.Contains(cacheStoreDrivers, ev.runtimeUsedStore) {
+		return failOutcome(CheckQueueRestart, fmt.Sprintf(
+			"runtime cache store %q is not a known Laravel cache store (expected one of: %s)",
+			ev.runtimeUsedStore, strings.Join(cacheStoreDrivers, ", ")))
+	}
+
 	if ev.runtimeUsedStore != "file" {
 		return passOutcome(CheckQueueRestart, fmt.Sprintf(
-			"cache store is %q: the queue restart signal lives in the shared %q store under key %q, external to the release directory (artifact-embedded evidence applies to the file store); the recorded queue_restart activation outcome is the runtime's lifecycle evidence and the signal is re-checkable in the shared store",
+			"cache store is the known driver %q: the queue restart signal lives in the shared %q store under key %q, external to the release directory (artifact-embedded evidence applies to the file store); the recorded queue_restart activation outcome is the runtime's lifecycle evidence and the signal is re-checkable in the shared store",
 			ev.runtimeUsedStore, ev.runtimeUsedStore, queueRestartCacheKey))
 	}
 
@@ -825,6 +911,27 @@ func checkRollbackBehavior(artifactPath string) contracts.VerificationOutcome {
 		strings.Join(coverage, "; ")))
 }
 
+// maxEvidenceFileSize bounds the bytes a single evidence file read may
+// return — the lifecycle-conformity checks read small configuration and
+// cache files, so a larger entry indicates a malformed or malicious
+// artifact. The bound applies to directory reads and archive entries
+// alike; exceeding it is an error, not a silent truncation.
+const maxEvidenceFileSize = 16 << 20 // 16 MiB
+
+// readEvidenceContent reads at most maxEvidenceFileSize+1 bytes and
+// fails when the content exceeds the bound — a truncated read would
+// produce re-checkable-looking evidence from partial content.
+func readEvidenceContent(r io.Reader, what string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxEvidenceFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxEvidenceFileSize {
+		return nil, fmt.Errorf("%s exceeds the %d byte evidence read limit", what, maxEvidenceFileSize)
+	}
+	return data, nil
+}
+
 // artifactReadFile returns the content of relPath inside the artifact
 // (directory or tar.gz archive). The bool reports whether the path
 // exists; an unreadable artifact is an error.
@@ -834,11 +941,16 @@ func artifactReadFile(artifactPath, relPath string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if info.IsDir() {
-		data, err := os.ReadFile(filepath.Join(artifactPath, relPath))
+		f, err := os.Open(filepath.Join(artifactPath, relPath))
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil, false, nil
 			}
+			return nil, false, err
+		}
+		defer f.Close()
+		data, err := readEvidenceContent(f, relPath)
+		if err != nil {
 			return nil, false, err
 		}
 		return data, true, nil
@@ -848,7 +960,8 @@ func artifactReadFile(artifactPath, relPath string) ([]byte, bool, error) {
 
 // readArchiveEntry scans a tar.gz archive for relPath (accepting the
 // optional "app/" deployable-content prefix) and returns the content of
-// the first matching regular-file entry.
+// the first matching regular-file entry, bounded by the evidence read
+// limit.
 func readArchiveEntry(archivePath, relPath string) ([]byte, bool, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -873,7 +986,7 @@ func readArchiveEntry(archivePath, relPath string) ([]byte, bool, error) {
 		}
 		name := strings.TrimPrefix(hdr.Name, "app/")
 		if name == relPath && hdr.Typeflag == tar.TypeReg {
-			data, err := io.ReadAll(tr)
+			data, err := readEvidenceContent(tr, fmt.Sprintf("archive entry %q", relPath))
 			if err != nil {
 				return nil, false, err
 			}
