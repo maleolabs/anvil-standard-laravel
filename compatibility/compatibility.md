@@ -1,10 +1,10 @@
 # Compatibility — Laravel
 
-The Compatibility part of the standard (ADR-021 §5.4): the declared
-compatibility — the contract version targeted and the framework versions
-supported. Compatibility is declared, validated, and recorded — not assumed
-(A2, PRD-002 §5.8): a standard that does not declare compatibility is
-rejected at adoption.
+The Compatibility part of the standard (ADR-021 §5.4, 007 §8): the
+declared compatibility — the contract version targeted and the framework
+versions supported. Compatibility is declared, validated, and recorded —
+not assumed (A2, PRD-002 §5.8): a standard that does not declare
+compatibility is rejected at adoption.
 
 ## Declared contract version
 
@@ -47,6 +47,23 @@ responsibility (007 §7; Transition Plan §4.7) — the runtime executes what
 the standard ships and never patches stale content; content changes ship
 as new standard versions, never as a Core change (ADR-021 §3.5, ADR-025
 §3.5).
+
+## Where compatibility is validated
+
+Compatibility is validated at two points (007 §8):
+
+- **At adoption** — by the registry: a standard that violates the
+  specification's contracts is rejected at adoption, not patched by Core
+  (007 §5.5, ADR-023). The declared contract version and framework-version
+  support scope are checked before the standard becomes installable.
+- **At runtime** — the runtime re-verifies compatibility when it executes
+  the standard (007 §5.8): the declared contract version from the
+  manifest is enforced per invocation, and the declared framework-version
+  support scope is a validation fact against the adopting project's
+  framework version.
+
+How an adopter project verifies its framework version against this scope
+is covered in the [adoption guide](../docs/adopt.md).
 
 ## Versioning policy
 

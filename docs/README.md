@@ -93,6 +93,7 @@ anvil server release rollback my-app
 
 | Page | Contents |
 |---|---|
+| [adopt.md](adopt.md) | **Adopting the lifecycle**: install the standard, adopt it in a project, what activation runs, what rollback reverses, verification, config surface, irreversibility (007 §9) |
 | [init.md](init.md) | What `anvil init --framework laravel` generates; framework selection errors |
 | [build.md](build.md) | Build pipeline template, `--env` flag, `environments:` overrides |
 | [deploy.md](deploy.md) | Server deployment: register, install, activate, rollback |
@@ -100,4 +101,19 @@ anvil server release rollback my-app
 | [manifest.md](manifest.md) | Activation/rollback commands in the artifact manifest |
 | [config.md](config.md) | `framework.laravel.*` keys (reserved) |
 
-See also: [Adapters Wiki](../README.md) · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)
+## The standard's parts
+
+This repository carries the seven-part standard structure (ADR-021 §5.4);
+the parts behind the executable behavior are:
+
+| Part | Location |
+|---|---|
+| Manifest — identity, version, capability declaration, support scope | [`MANIFEST.md`](../MANIFEST.md) · [`manifest/`](../manifest/) |
+| Lifecycle Definition — activation phases, migration timing, rollback semantics | [`lifecycle/definition.md`](../lifecycle/definition.md) |
+| Verification — the 8 structural checks | [`verification/checks.md`](../verification/checks.md) |
+| Templates — build pipeline + config extension | [`templates/README.md`](../templates/README.md) |
+| Compatibility — contract version, framework-version support scope | [`compatibility/compatibility.md`](../compatibility/compatibility.md) |
+| Documentation — these pages | `docs/` |
+| Tests — Go tests throughout `internal/` | `internal/laravel/` · `internal/release/` · `internal/contracts/` |
+
+See also: [Adopters' entry point](adopt.md) · [Adapters Wiki](../README.md) · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)
