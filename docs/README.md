@@ -114,6 +114,6 @@ the parts behind the executable behavior are:
 | Templates — build pipeline + config extension | [`templates/README.md`](../templates/README.md) |
 | Compatibility — contract version, framework-version support scope | [`compatibility/compatibility.md`](../compatibility/compatibility.md) |
 | Documentation — these pages | `docs/` |
-| Tests — Go tests throughout `internal/` | `internal/laravel/` · `internal/release/` · `internal/contracts/` |
+| Tests — structure + acceptance surface, and Go tests throughout `internal/` | [`tests/`](../tests/) · `internal/laravel/` · `internal/release/` · `internal/contracts/` |
 
 See also: [Adopters' entry point](adopt.md) · [Adapters Wiki](../README.md) · [Limitations](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/limitations.md) · [Glossary](https://github.com/maleolabs/forge-anvil-cli/blob/develop/wiki/glossary.md)
