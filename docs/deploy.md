@@ -40,7 +40,7 @@ anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 Install runs, in order:
 
 1. Generic artifact integrity verification (archive, manifest, checksum)
-2. **The 8 Laravel verification checks** — all must pass or the install fails (see [verify.md](verify.md))
+2. **The 8 structural Laravel verification checks** — all must pass or the install fails (see [verify.md](verify.md)); the 4 lifecycle-conformity checks run later, at the post-activation verify stage of the activation sequence (command-contract.md §4.2: `prepare → configure → framework phases → verify → promote`)
 3. Project ID match between artifact manifest and registry
 4. Release creation in `ready` stage
 
@@ -67,6 +67,8 @@ The artifact is extracted into the release directory (shared links applied), the
 **Failure semantics.** A failing phase fails the activation; per-phase semantics are declared in the [Lifecycle Definition](../lifecycle/definition.md) — migrations converge on re-run, caches are regenerated from code, and the queue restart signal is idempotent (re-sending it is safe).
 
 **Queue restart.** `queue_restart` runs last, after migration and cache warming: `php artisan queue:restart` signals running workers to recycle so they pick up the new code, migrations, and caches — no worker processes a job against stale state.
+
+**Post-activation verify stage.** After the framework phases run, the activation sequence reaches the fixed **verify** position (command-contract.md §4.2: `prepare → configure → framework phases → verify → promote`) — the lifecycle-conformity verification checks (shared-resource wiring, migration timing, queue restart, rollback behavior) execute there against the release directory, immediately before the atomic promotion. See [verify.md](verify.md).
 
 ## 4. Roll back a Release
 

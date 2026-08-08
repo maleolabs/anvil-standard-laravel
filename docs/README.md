@@ -16,7 +16,7 @@ The Laravel adapter gives Anvil Laravel-specific behavior for building, packagin
 |---|---|
 | **Init template** | `anvil init my-app --framework laravel` generates the Laravel build pipeline from the installed standard's template content when the standard supplies it (TS-015-02-03), or from the adapter's `template` command as the interim fallback (ADR-020) — and records the framework declaration in a framework-agnostic project config — no Core-owned framework defaults ([init.md](init.md)) |
 | **Build pipeline** | Composer → npm → artisan cache commands as the default `.anvil/pipelines/build.yaml` ([build.md](build.md)) |
-| **Verification** | 8 Laravel structure checks that must pass before an artifact is installed on a server ([verify.md](verify.md)) |
+| **Verification** | 12 Laravel checks — 8 structural (files/structures must exist, run at release install) + 4 lifecycle-conformity (shared-resource wiring, migration timing, queue restart, rollback behavior, run at the post-activation verify position per command-contract §4.2) ([verify.md](verify.md)) |
 | **Activation** | `php artisan migrate --force`, `config:cache`, `route:cache`, `event:cache`, `queue:restart` on release activate — migrations post-promotion, cache warming first, worker recycling last ([deploy.md](deploy.md), [Lifecycle Definition](../lifecycle/definition.md)) |
 | **Rollback** | `php artisan migrate:rollback --force` on release rollback; cache and queue phases are irreversible and never block rollback ([deploy.md](deploy.md)) |
 | **Manifest metadata** | Activation/rollback command strings for the artifact manifest (ADR-017) ([manifest.md](manifest.md)) |
@@ -79,7 +79,7 @@ anvil server project register \
   --adapter laravel \
   --non-interactive
 
-# 5. Install the artifact as a Release (runs the 8 Laravel verification checks)
+# 5. Install the artifact as a Release (runs the 8 structural Laravel verification checks; the 4 lifecycle-conformity checks run at the post-activation verify stage — command-contract §4.2)
 anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 
 # 6. Activate the Release (runs Laravel activation phases)
@@ -97,7 +97,7 @@ anvil server release rollback my-app
 | [init.md](init.md) | What `anvil init --framework laravel` generates; framework selection errors |
 | [build.md](build.md) | Build pipeline template, `--env` flag, `environments:` overrides |
 | [deploy.md](deploy.md) | Server deployment: register, install, activate, rollback |
-| [verify.md](verify.md) | The 8 verification checks (table) and where they run |
+| [verify.md](verify.md) | The 12 verification checks (table) and where they run |
 | [manifest.md](manifest.md) | Activation/rollback commands in the artifact manifest |
 | [config.md](config.md) | `framework.laravel.*` keys (reserved) |
 
@@ -110,7 +110,7 @@ the parts behind the executable behavior are:
 |---|---|
 | Manifest — identity, version, capability declaration, support scope | [`MANIFEST.md`](../MANIFEST.md) · [`manifest/`](../manifest/) |
 | Lifecycle Definition — activation phases, migration timing, rollback semantics | [`lifecycle/definition.md`](../lifecycle/definition.md) |
-| Verification — the 8 structural checks | [`verification/checks.md`](../verification/checks.md) |
+| Verification — 8 structural + 4 lifecycle-conformity checks | [`verification/checks.md`](../verification/checks.md) |
 | Templates — build pipeline + config extension | [`templates/README.md`](../templates/README.md) |
 | Compatibility — contract version, framework-version support scope | [`compatibility/compatibility.md`](../compatibility/compatibility.md) |
 | Documentation — these pages | `docs/` |
