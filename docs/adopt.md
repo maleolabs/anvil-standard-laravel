@@ -110,7 +110,7 @@ anvil server project register \
   --adapter laravel \
   --non-interactive
 
-# 6. Install the artifact as a Release (runs the 8 verification checks)
+# 6. Install the artifact as a Release (runs the 12 verification checks)
 anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 
 # 7. Activate the Release (runs the 5 activation phases)
@@ -156,18 +156,27 @@ Key semantics (full detail in the [Lifecycle Definition](../lifecycle/definition
 
 ## 6. What verification checks
 
-Release install runs the standard's **8 structural verification checks**
-against the artifact — all must pass or the install fails (see
+Release install runs the standard's **12 verification checks** against
+the artifact — all must pass or the install fails (see
 [docs/verify.md](verify.md) and [verification/checks.md](../verification/checks.md)):
 
+**Structural (8, the preserved v1.x surface):**
 `vendor_present` · `bootstrap_structure` · `config_files` · `artisan_file`
 · `composer_json` · `env_file` · `app_directory` · `routes_directory`
 
-The checks validate that the artifact looks like a deployable Laravel
-application (Composer autoloader, bootstrap, config, artisan entrypoint,
-composer manifest, environment file, app and routes directories) before
-it is installed on a server. Gates are mandatory and unskippable — the
-standard adds checks, it never weakens gates (007 §6).
+**Lifecycle-conformity (4, TS-018-03-01):**
+`shared_resource_wiring` · `migration_timing` · `queue_restart` ·
+`rollback_behavior`
+
+The structural checks validate that the artifact looks like a deployable
+Laravel application (Composer autoloader, bootstrap, config, artisan
+entrypoint, composer manifest, environment file, app and routes
+directories) before it is installed on a server. The lifecycle-conformity
+checks verify framework behavior at lifecycle points against
+re-checkable evidence embedded in the release — the shared cache store
+wiring, the post-promotion migration timing evidence, the queue restart
+signal, and the declared rollback semantics. Gates are mandatory and
+unskippable — the standard adds checks, it never weakens gates (007 §6).
 
 ## 7. Configuration surface
 

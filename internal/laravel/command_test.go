@@ -52,8 +52,8 @@ func TestRun_Capabilities(t *testing.T) {
 	if len(result.Declaration.ActivationPhases) != 5 {
 		t.Errorf("ActivationPhases length = %d, want 5", len(result.Declaration.ActivationPhases))
 	}
-	if len(result.Declaration.VerificationChecks) != 8 {
-		t.Errorf("VerificationChecks length = %d, want 8", len(result.Declaration.VerificationChecks))
+	if len(result.Declaration.VerificationChecks) != 12 {
+		t.Errorf("VerificationChecks length = %d, want 12", len(result.Declaration.VerificationChecks))
 	}
 	if len(result.Declaration.BuildPhases) != 5 {
 		t.Errorf("BuildPhases length = %d, want 5", len(result.Declaration.BuildPhases))

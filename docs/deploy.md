@@ -40,7 +40,7 @@ anvil server release install my-app .anvil/artifacts/<artifact>.tar.gz
 Install runs, in order:
 
 1. Generic artifact integrity verification (archive, manifest, checksum)
-2. **The 8 Laravel verification checks** — all must pass or the install fails (see [verify.md](verify.md))
+2. **The 12 Laravel verification checks** — all must pass or the install fails (see [verify.md](verify.md))
 3. Project ID match between artifact manifest and registry
 4. Release creation in `ready` stage
 

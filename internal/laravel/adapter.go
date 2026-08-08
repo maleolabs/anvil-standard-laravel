@@ -91,6 +91,22 @@ func Capabilities() contracts.CapabilityResult {
 					Name:        CheckRoutesDirectory,
 					Description: "validates that the routes/ directory exists in the artifact",
 				},
+				{
+					Name:        CheckSharedResourceWiring,
+					Description: "validates that the shared cache store the release declares is the store the release runs with and is wired in config/cache.php (lifecycle-conformity, TS-018-03-01)",
+				},
+				{
+					Name:        CheckMigrationTiming,
+					Description: "validates re-checkable evidence that migrations ran at the declared post-promotion timing (lifecycle-conformity, TS-018-03-01)",
+				},
+				{
+					Name:        CheckQueueRestart,
+					Description: "validates re-checkable evidence that the queue was restarted after activation (lifecycle-conformity, TS-018-03-01)",
+				},
+				{
+					Name:        CheckRollbackBehavior,
+					Description: "validates that rollback produces the declared state: per-phase rollback coverage and force-confirmed migration rollback (lifecycle-conformity, TS-018-03-01)",
+				},
 			},
 		},
 	}

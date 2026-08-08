@@ -56,8 +56,12 @@ execution order.
 ### Verification checks
 
 `vendor_present`, `bootstrap_structure`, `config_files`, `artisan_file`,
-`composer_json`, `env_file`, `app_directory`, `routes_directory` —
-the structural verification rules
+`composer_json`, `env_file`, `app_directory`, `routes_directory`,
+`shared_resource_wiring`, `migration_timing`, `queue_restart`,
+`rollback_behavior` — the structural verification rules (the preserved
+v1.x surface) plus the lifecycle-conformity rules (TS-018-03-01:
+shared-resource wiring, migration timing relative to promotion, queue
+restart, rollback behavior; ADR-033 §3)
 ([verification/checks.md](verification/checks.md)).
 
 ### Config extensions
