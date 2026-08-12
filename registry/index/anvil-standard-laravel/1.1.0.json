@@ -1,0 +1,60 @@
+{
+  "$schema": "urn:anvil:spec:registry-metadata:1.0.0",
+  "title": "Laravel Delivery Lifecycle Standard",
+  "description": "Registry metadata for the Laravel delivery lifecycle standard (maleolabs/anvil-standard-laravel): the distributable unit of Laravel framework lifecycle knowledge for the Anvil Runtime. This document is the source manifest of the standard; the release pipeline publishes the release-specific metadata document (same identity, release version, content digests and attestation over the release artifact) per ADR-030 and TS-016-03-02.",
+  "id": "anvil-standard-laravel",
+  "version": "1.1.0",
+  "contractVersion": "1.0.0",
+  "capability": {
+    "frameworkVersion": [
+      "10.0.0",
+      "11.0.0",
+      "12.0.0"
+    ]
+  },
+  "distribution": {
+    "type": "github-releases",
+    "location": "https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.1.0/anvil-standard-laravel-1.1.0.tar.gz"
+  },
+  "lifecycle": {
+    "state": "published"
+  },
+  "trust": {
+    "contentDigests": [
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "2ebc527f1f6da40df793e0895b9cfbd9d564977d86e84f68a03d3b00411a29de"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "a3fe34bc6211b3d4b52e0bfd9180f6592b4357a4eeb99164dbed0a976bba4007",
+        "name": "anvil-adapter-laravel-darwin-amd64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "fce6cd2c02f95cd02bccccc9ef31bee1ebf6035b699801da6c09ebcb554af1d6",
+        "name": "anvil-adapter-laravel-darwin-arm64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "22fdc46be1ce2ffa861cbc6ced2bc73f48519914a24be91aaecd94cb97050ec3",
+        "name": "anvil-adapter-laravel-linux-amd64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "ea3c142cf9621b877cb1895f86173f0ae2cc5240cfbcbb96f0dbee564d93718a",
+        "name": "anvil-adapter-laravel-linux-arm64"
+      }
+    ],
+    "attestation": {
+      "algorithm": "ed25519",
+      "signature": "Jcp88amrwtQlvvblt52FASi3nBhW58BMB9EU1iAr/S6K2UbH6iclKhlUD397aUhe0ZOoW/sAuADqaJa1nDF7BA==",
+      "publicKey": "hx6ZvoRaM4XWDP0bvSD0VkmD5c+E4Y/hebdRcO1xggU="
+    }
+  }
+}
