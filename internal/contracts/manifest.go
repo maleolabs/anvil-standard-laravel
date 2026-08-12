@@ -31,7 +31,7 @@ type ManifestCommandResult struct {
 	ActivationCommands []string `json:"activation_commands,omitempty"`
 
 	// RollbackCommands are the full rollback command strings (e.g.
-	// "php artisan migrate:rollback") in execution order, stored in
+	// "php artisan migrate:rollback --force") in execution order, stored in
 	// artifact.Manifest.RollbackCommands. Empty when the framework has
 	// no server activation (omitted by omitempty).
 	RollbackCommands []string `json:"rollback_commands,omitempty"`

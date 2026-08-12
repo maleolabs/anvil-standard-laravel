@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 )
 
 // Source manifest and derived document shapes (TS-016-03-02).
@@ -61,11 +63,22 @@ type Lifecycle struct {
 
 // ContentDigest is one integrity digest entry (registry-metadata.schema.json
 // §contentDigest): algorithm sha-256, encoding base16/base32/base64, and
-// the digest value in the declared encoding.
+// the digest value in the declared encoding. The optional Name binds the
+// entry to a named release asset of the same release (TS-014-04-04 — e.g.
+// an adapter binary "anvil-adapter-laravel-linux-amd64"); absent for the
+// release-content digest (the archive). Every entry — named or not — is
+// covered by the publisher attestation (the canonical payload
+// concatenates all decoded digest bytes in array order).
+//
+// FIELD ORDER NOTE: Name is deliberately the LAST struct field — the
+// produced document's JSON carries it last inside each entry object, and
+// Core's install.sh extracts per-asset digests with a line-oriented
+// parser that relies on that order (docs/install.sh usage; TS-014-04-04).
 type ContentDigest struct {
 	Algorithm string `json:"algorithm"`
 	Encoding  string `json:"encoding"`
 	Digest    string `json:"digest"`
+	Name      string `json:"name,omitempty"`
 }
 
 // Attestation is the publisher attestation of a release (ADR-022 §3): an
@@ -79,7 +92,9 @@ type Attestation struct {
 }
 
 // Trust carries the trust fields of a release: content digest(s) and
-// publisher attestation, present from day one (ADR-022 §3).
+// publisher attestation, present from day one (ADR-022 §3). Since
+// TS-014-04-04 the digest set covers the release content (unnamed
+// entries) AND the release's binary assets (named entries).
 type Trust struct {
 	ContentDigests []ContentDigest `json:"contentDigests"`
 	Attestation    Attestation     `json:"attestation"`
@@ -173,15 +188,57 @@ func DigestArchive(path string) (string, error) {
 	return SHA256Base16(data), nil
 }
 
+// BinaryAssetDigests computes the NAMED content digest entries of every
+// regular file in dir (the release pipeline's platform binaries staging
+// directory, "binaries/" — TS-014-04-04): each entry declares the
+// canonical base16 SHA-256 digest of one binary asset, bound to the asset
+// file name. The entries are sorted by file name so the derived
+// document's contentDigests array order is deterministic (the
+// attestation payload concatenates the digests in array order, so the
+// order is signed material). A file that cannot be read fails the
+// release: the pipeline never publishes a digest it cannot compute.
+func BinaryAssetDigests(dir string) ([]ContentDigest, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read binaries directory %s: %w", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+
+	digests := make([]ContentDigest, 0, len(names))
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("read binary asset %s: %w", name, err)
+		}
+		digests = append(digests, ContentDigest{
+			Algorithm: DigestAlgorithmSHA256,
+			Encoding:  DigestEncodingBase16,
+			Digest:    SHA256Base16(data),
+			Name:      name,
+		})
+	}
+	return digests, nil
+}
+
 // DeriveDocument derives the publishable release metadata document from the
 // source manifest: identity, contract version, and capability declaration
 // are carried over unchanged; version, distribution, lifecycle, and trust
 // are populated from the real release (TS-016-03-02).
 //
-// digestB16 is the canonical base16 SHA-256 digest of the release archive;
-// signature and publicKey are the Ed25519 attestation material over the
-// canonical payload composed from the declared digest (sign.go).
-func DeriveDocument(src *SourceManifest, version, location, digestB16, signature, publicKey string) *MetadataDocument {
+// contentDigests is the FULL attestation-bound digest set: the release
+// archive digest (unnamed entry) followed by the named digests of the
+// release's binary assets (TS-014-04-04). signature and publicKey are the
+// Ed25519 attestation material over the canonical payload composed from
+// the declared digests (sign.go) — the signature binds the archive AND
+// every binary asset.
+func DeriveDocument(src *SourceManifest, version, location string, contentDigests []ContentDigest, signature, publicKey string) *MetadataDocument {
 	return &MetadataDocument{
 		Schema:          schemaOr(src.Schema, SchemaURN),
 		Title:           src.Title,
@@ -198,11 +255,7 @@ func DeriveDocument(src *SourceManifest, version, location, digestB16, signature
 			State: LifecycleStatePublished,
 		},
 		Trust: Trust{
-			ContentDigests: []ContentDigest{{
-				Algorithm: DigestAlgorithmSHA256,
-				Encoding:  DigestEncodingBase16,
-				Digest:    digestB16,
-			}},
+			ContentDigests: contentDigests,
 			Attestation: Attestation{
 				Algorithm: AttestationAlgorithmEd25519,
 				Signature: signature,
@@ -212,13 +265,25 @@ func DeriveDocument(src *SourceManifest, version, location, digestB16, signature
 	}
 }
 
-// WriteDocument writes the metadata document as pretty-printed JSON.
-func WriteDocument(doc *MetadataDocument, path string) error {
+// DocumentBytes renders the metadata document as pretty-printed JSON
+// with a trailing newline — the EXACT bytes written to the release asset
+// (registry-metadata-<version>.json) and the bytes the detached document
+// signature covers (SignDocumentBytes, security review F-1).
+func DocumentBytes(doc *MetadataDocument) ([]byte, error) {
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode metadata document: %w", err)
+		return nil, fmt.Errorf("encode metadata document: %w", err)
 	}
-	raw = append(raw, '\n')
+	return append(raw, '\n'), nil
+}
+
+// WriteDocument writes the metadata document as pretty-printed JSON
+// (DocumentBytes) to path.
+func WriteDocument(doc *MetadataDocument, path string) error {
+	raw, err := DocumentBytes(doc)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return fmt.Errorf("write metadata document %s: %w", path, err)
 	}

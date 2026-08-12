@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // ValidateDocumentShape asserts that a derived metadata document satisfies
@@ -94,6 +95,7 @@ func ValidateDocumentShape(doc *MetadataDocument) error {
 		problems = append(problems, "trust.contentDigests must contain at least one digest (ADR-022 §3)")
 	} else {
 		seen := make(map[string]bool, len(doc.Trust.ContentDigests))
+		seenNames := make(map[string]bool, len(doc.Trust.ContentDigests))
 		for i, d := range doc.Trust.ContentDigests {
 			if d.Algorithm != DigestAlgorithmSHA256 {
 				problems = append(problems, fmt.Sprintf("trust.contentDigests[%d].algorithm %q is not supported (only %q)", i, d.Algorithm, DigestAlgorithmSHA256))
@@ -111,6 +113,18 @@ func ValidateDocumentShape(doc *MetadataDocument) error {
 				problems = append(problems, fmt.Sprintf("trust.contentDigests[%d] uses encoding %q, which the release pipeline does not produce (only base16)", i, d.Encoding))
 			default:
 				problems = append(problems, fmt.Sprintf("trust.contentDigests[%d].encoding %q is not supported (base16, base32, base64)", i, d.Encoding))
+			}
+			// Optional asset binding (TS-014-04-04): a safe asset
+			// identifier, unique across entries — two entries can never
+			// bind the same asset (mirrors Core parse.go).
+			if d.Name != "" {
+				if !reAssetName.MatchString(d.Name) {
+					problems = append(problems, fmt.Sprintf("trust.contentDigests[%d].name %q is not a safe asset name (^[a-z0-9][a-z0-9-]*$ — lowercase alphanumeric with hyphens)", i, d.Name))
+				}
+				if seenNames[d.Name] {
+					problems = append(problems, fmt.Sprintf("trust.contentDigests[%d].name %q duplicates an earlier entry (two entries cannot bind the same asset)", i, d.Name))
+				}
+				seenNames[d.Name] = true
 			}
 			key := d.Algorithm + "\x00" + d.Encoding + "\x00" + d.Digest
 			if seen[key] {
@@ -169,7 +183,7 @@ func ValidateVersionMatch(declared, manifestVersion string) error {
 // characters, no userinfo (mirrors Core parse.go checkHTTPSURL).
 func checkHTTPSLocation(location string) error {
 	for _, r := range location {
-		if r < 0x20 || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		if r < 0x20 || unicode.IsSpace(r) {
 			return fmt.Errorf("must not contain whitespace or control characters — the location is a resolvable https URL, not free text")
 		}
 	}
@@ -188,6 +202,9 @@ var (
 	rePlainSemver      = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 	reFrameworkVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	reDigestBase16     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// reAssetName is the optional contentDigest.name pattern
+	// (TS-014-04-04): safe asset identifiers only.
+	reAssetName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
 // plural returns "s" for counts other than one.

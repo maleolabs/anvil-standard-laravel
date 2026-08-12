@@ -26,6 +26,16 @@ The Laravel adapter declares framework-specific configuration keys under the **`
 
 Unknown keys under the namespace are rejected.
 
+Every declared key has a validation rule — a declared key can never
+silently pass through the unknown-key rejection (test-enforced,
+TS-018-01-02). The validation rules track the Laravel versions in the
+standard's support scope: e.g. the known cache driver list follows the
+drivers Laravel's `config/cache.php` ships. Keeping the rules fresh
+against framework updates is a maintainer responsibility (007 §7;
+Transition Plan §4.7) — documented in
+[templates/README.md](../templates/README.md); content changes ship as
+new standard versions, never as a Core change.
+
 ## Runtime validation from the installed standard
 
 Independent of the adapter's `validate` command (which owns the framework's

@@ -8,10 +8,10 @@
 // §10).
 //
 // Supported commands: capabilities, build, activate, verify, extension,
-// validate, template (005-adapter-command-contract §5.2, §6.2; the
-// template command returns the adapter-owned pipeline definitions,
-// ADR-020 §1). JSON result on stdout; exit 0 on a produced result,
-// non-zero on dispatch failure (ADR-010 §8.1).
+// validate, template, manifest (005-adapter-command-contract §5.2, §6.2,
+// §10.10; the template command returns the adapter-owned pipeline
+// definitions, ADR-020 §1). JSON result on stdout; exit 0 on a produced
+// result, non-zero on dispatch failure (ADR-010 §8.1).
 //
 // Reference: TS-P7-09, TS-P7-10, TS-P7-11, TS-P7-12, TS-P7-14,
 // TS-007-038, ADR-020, 004-review-resolutions D1

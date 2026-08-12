@@ -72,11 +72,13 @@ The workflow then:
    carried over) with the release-time fields populated from the real
    release: `distribution` (github-releases, https), `lifecycle`
    (`published`), and `trust` with the **real SHA-256 content digest** of
-   the archive and an **Ed25519 publisher attestation** over the canonical
-   payload (see Trust below). The source manifest's placeholder trust
+   the archive AND of every platform binary (TS-014-04-04) and an
+   **Ed25519 publisher attestation** over the canonical payload (see Trust
+   below). The source manifest's placeholder trust
    values are never shipped; the derived document is run through the
    pipeline's self-parse guard (the strict-parser format surface) and
-   self-verified (integrity + attestation) before publishing.
+   self-verified (integrity + attestation + per-binary digests) before
+   publishing.
 6. **Publish** — creates the GitHub Release with the archive, the registry
    metadata document, `SHA256SUMS.txt`, and the platform binaries; the
    release notes carry the attestation public key and a ready-to-use trust
@@ -115,15 +117,20 @@ the test index document if one was ever published for that version).
 |---|---|
 | `anvil-standard-laravel-<version>.tar.gz` | The release content: platform binaries + standard parts; the content `distribution.location` resolves and `trust.contentDigests` covers |
 | `registry-metadata-<version>.json` | The registry metadata document of this release (discoverable, installable through the registry flow) |
-| `SHA256SUMS.txt` | Checksums of every asset |
+| `registry-metadata-<version>.json.sig` | The DETACHED Ed25519 signature over the raw metadata document bytes (F-1), published only when signing with a STABLE key; the bootstrap installer verifies it with its pinned publisher key before trusting the document's digests |
+| `SHA256SUMS.txt` | Checksums of every asset (same-channel fallback material for adopters without the attestation path) |
 | `binaries/anvil-adapter-laravel-<os>-<arch>` | The standard executable per release platform |
 
 ## Trust (ADR-022)
 
 - **Integrity.** `trust.contentDigests` carries the real SHA-256 digest
-  (canonical base16) of the release archive. At adoption every declared
-  digest must match the recomputed hash of the fetched content
-  (all-match semantics).
+  (canonical base16) of the release archive plus a NAMED entry per
+  platform binary (TS-014-04-04: `contentDigests[].name` binds the entry
+  to its asset, e.g. `anvil-adapter-laravel-linux-amd64`). At adoption
+  every declared CONTENT digest must match the recomputed hash of the
+  fetched content (all-match semantics), and every installed binary is
+  verified against its named entry — closing the same-channel, unsigned
+  `SHA256SUMS.txt` trust gap (TS-016-04-01 §6 accepted risk 1).
 - **Publisher attestation.** `trust.attestation` is an Ed25519 signature
   over the canonical payload
 
@@ -134,7 +141,23 @@ the test index document if one was ever published for that version).
 
   — the exact composition the Anvil Runtime registry client verifies
   byte-for-byte (Core `internal/registry/trust.go`; PM decision D-01) —
-  plus the publisher's base64 verification public key.
+  plus the publisher's base64 verification public key. Because the payload
+  concatenates EVERY declared digest in array order — each named entry
+  contributing `utf8(name) || 0x00 || digest bytes` (security review
+  F-2) — the signature binds the archive AND each binary asset AND the
+  asset NAME: a same-channel attacker who swaps a binary (and its
+  checksum entry) cannot adjust the named digest, strip the name (to
+  force the checksum fallback), or rename it across assets without the
+  signing key.
+
+  The pipeline additionally publishes a DETACHED signature over the RAW
+  metadata document bytes (`registry-metadata-<version>.json.sig`,
+  security review F-1) when signing with a STABLE key
+  (`RELEASE_SIGNING_KEY` / `--key`): the bootstrap installer
+  (install.sh) verifies it against its pinned publisher key before
+  trusting any digest inside the document. Release-time-generated keys
+  ship no `.sig` — nothing could verify them out of band, and a stray
+  signature would fail installs closed.
 - **What the attestation actually guarantees.** The Ed25519 signature
   proves the release was signed by the holder of the declared public key
   and that the declared claims (id, version, content digests) are bound

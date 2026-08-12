@@ -32,7 +32,7 @@ The repository carries the seven-part standard structure (ADR-021 §5.4):
 | **Templates** | [`templates/`](templates/) | Build pipeline template and configuration extension |
 | **Compatibility** | [`compatibility/`](compatibility/) | Declared contract version and supported framework versions |
 | **Documentation** | [`docs/`](docs/) | The Laravel lifecycle documentation for adopters |
-| **Tests** | Go tests throughout | The standard's own tests, validated at registry acceptance |
+| **Tests** | [`tests/`](tests/) | The standard's own tests, validated at registry acceptance |
 
 The executable implementation lives in [`internal/laravel/`](internal/laravel/)
 (the framework lifecycle content) and [`cmd/laravel-adapter/`](cmd/laravel-adapter/)
@@ -102,6 +102,13 @@ This standard versions independently from the Core runtime (ADR-021 §3.4).
 Every release declares the contract version it targets and its
 framework-version support scope in the [manifest](manifest/) (ADR-023 §3,
 PRD-002 §5.8). See [compatibility/](compatibility/).
+
+## Maintainership
+
+The standard is owned by its maintainers, not by Core (ADR-027 §3): Maleo
+Labs Engineering (`engineering@maleolabs.com`), accountable maintainer
+Marij Mokoginta (`marijmokoginta04@gmail.com`). The declaration lives in
+the [Manifest](MANIFEST.md) (Maintainership section).
 
 ## License
 

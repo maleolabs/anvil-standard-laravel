@@ -2,6 +2,8 @@
 
 A Laravel project created with `anvil init --framework laravel` gets a build pipeline tailored to Laravel's production build steps. It is executed with `anvil pipeline build`, which runs the pipeline defined in `.anvil/pipelines/build.yaml`.
 
+The generated pipeline is derived from the standard's build phase table — the same table the standard executable's own build pipeline executes — so the generated YAML always covers the framework's build steps and cannot drift from them (TS-018-01-02). The human-readable form of the template content is [templates/README.md](../templates/README.md).
+
 ## The generated pipeline
 
 | Stage | Task | Command | Purpose |
@@ -13,6 +15,18 @@ A Laravel project created with `anvil init --framework laravel` gets a build pip
 | `optimize` | `cache-view` | `php artisan view:cache` | Cache compiled views |
 
 Tasks run in order; the pipeline stops at the first failing task.
+
+## Maintenance: template freshness
+
+The build steps above track the Laravel versions in the standard's
+support scope ([compatibility](../compatibility/compatibility.md)).
+Keeping the template fresh against framework updates is a **maintainer
+responsibility** (007 §7; Transition Plan §4.7): when a supported Laravel
+version changes a build step (e.g. the asset build), the standard's build
+phase table and template mappings are updated and released as a new
+standard version — never silently, never as a Core change. The freshness
+practice is documented in [templates/README.md](../templates/README.md);
+the template tests lock the phase-to-task correspondence.
 
 ## Running the build
 
