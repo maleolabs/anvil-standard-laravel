@@ -159,6 +159,40 @@ func ValidateDocumentShape(doc *MetadataDocument) error {
 		}
 	}
 
+	// ── skills (optional additive section, TS-021-04) ───────────────
+	// The section is optional; when present it is strict: name
+	// (^[a-z0-9][a-z0-9-]*$, ≤64), version (plain semver), asset (safe
+	// asset name, ≤128, unique within the section) and covered by a
+	// NAMED trust.contentDigests entry (the parser-enforced binding).
+	if len(doc.Skills) > 0 {
+		seenSkills := make(map[string]bool, len(doc.Skills))
+		named := make(map[string]bool, len(doc.Trust.ContentDigests))
+		for _, d := range doc.Trust.ContentDigests {
+			if d.Name != "" {
+				named[d.Name] = true
+			}
+		}
+		for i, s := range doc.Skills {
+			path := fmt.Sprintf("skills[%d]", i)
+			if !reSkillName.MatchString(s.Name) || len(s.Name) > 64 {
+				problems = append(problems, fmt.Sprintf("%s.name %q is not a safe skill name (^[a-z0-9][a-z0-9-]*$, max 64)", path, s.Name))
+			}
+			if seenSkills[s.Name] {
+				problems = append(problems, fmt.Sprintf("%s.name %q duplicates an earlier skill (names are unique within one release)", path, s.Name))
+			}
+			seenSkills[s.Name] = true
+			if !rePlainSemver.MatchString(s.Version) {
+				problems = append(problems, fmt.Sprintf("%s.version %q is not plain semver", path, s.Version))
+			}
+			if !reAssetName.MatchString(s.Asset) || len(s.Asset) > 128 {
+				problems = append(problems, fmt.Sprintf("%s.asset %q is not a safe asset identifier (^[a-z0-9][a-z0-9-]*$, max 128)", path, s.Asset))
+			}
+			if !named[s.Asset] {
+				problems = append(problems, fmt.Sprintf("%s.asset %q is not covered by a named trust.contentDigests entry — every declared skill asset must be attestation-bound (registry-metadata.md §4.8)", path, s.Asset))
+			}
+		}
+	}
+
 	if len(problems) > 0 {
 		return fmt.Errorf("derived registry metadata document is not strict-parser-compatible (%d problem%s):\n  - %s",
 			len(problems), plural(len(problems)), strings.Join(problems, "\n  - "))

@@ -113,6 +113,11 @@ type MetadataDocument struct {
 	Distribution    Distribution `json:"distribution"`
 	Lifecycle       Lifecycle    `json:"lifecycle"`
 	Trust           Trust        `json:"trust"`
+	// Skills is the optional additive skills declaration of the release
+	// (TS-021-04; ADR-037 D2; registry-metadata.md §4.8): the standard's
+	// per-skill release assets. Populated by the release pipeline from
+	// the pack fragment BEFORE signing — never from the source manifest.
+	Skills []Skill `json:"skills,omitempty"`
 }
 
 // Format constants (registry-metadata.schema.json; metadata.go in Core).
