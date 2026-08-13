@@ -1,0 +1,86 @@
+{
+  "$schema": "urn:anvil:spec:registry-metadata:1.0.0",
+  "title": "Laravel Delivery Lifecycle Standard",
+  "description": "Registry metadata for the Laravel delivery lifecycle standard (maleolabs/anvil-standard-laravel): the distributable unit of Laravel framework lifecycle knowledge for the Anvil Runtime. This document is the source manifest of the standard; the release pipeline publishes the release-specific metadata document (same identity, release version, content digests and attestation over the release artifact) per ADR-030 and TS-016-03-02.",
+  "id": "anvil-standard-laravel",
+  "version": "1.1.1",
+  "contractVersion": "1.0.0",
+  "capability": {
+    "frameworkVersion": [
+      "10.0.0",
+      "11.0.0",
+      "12.0.0"
+    ]
+  },
+  "distribution": {
+    "type": "github-releases",
+    "location": "https://github.com/maleolabs/anvil-standard-laravel/releases/download/v1.1.1/anvil-standard-laravel-1.1.1.tar.gz"
+  },
+  "lifecycle": {
+    "state": "published"
+  },
+  "trust": {
+    "contentDigests": [
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "6e50ee0b5ceebe376ec37aab04a826fc45563d026abd9270cca0770339e49c16"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "6921e61df7544e2faf637f86f6abb6b58381117e80563361f4c38b948e42894b",
+        "name": "anvil-adapter-laravel-darwin-amd64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "f95e8b7a3d320dd33e375d9ae1d7481f92db43f6fb1e8d74aef893b44d7836bd",
+        "name": "anvil-adapter-laravel-darwin-arm64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "d2bfd7f8e5bc13543453733e21ab2c3d854015316ece17389ab5ee5ebd8d6d07",
+        "name": "anvil-adapter-laravel-linux-amd64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "1e13f18cf68f98514e69845282693db07038833911807fccdfda8b2ac1a4fa05",
+        "name": "anvil-adapter-laravel-linux-arm64"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "60424b52c98570118844584d12fb8d81ba3fb355799c7707d7b5f73aded01320",
+        "name": "anvil-skill-laravel-conventions-1-0-0"
+      },
+      {
+        "algorithm": "sha-256",
+        "encoding": "base16",
+        "digest": "d027d2d6458f83922d2c0efb123bd172dd143bee0f8151e53383e578e9b50a29",
+        "name": "anvil-skill-laravel-delivery-1-0-0"
+      }
+    ],
+    "attestation": {
+      "algorithm": "ed25519",
+      "signature": "dQpgyxj0AacbjiqX754XWvS3RmwMbWWJ9J8GcktbMfpQGFpJqm2AZInqnR6avbRtuxeXpiMhjTa0UJPW08TkCA==",
+      "publicKey": "qor9vmLgyxcva1Nx7+IYWyvk4ZeOj6j4Ad0AjrBaN14="
+    }
+  },
+  "skills": [
+    {
+      "name": "laravel-conventions",
+      "version": "1.0.0",
+      "asset": "anvil-skill-laravel-conventions-1-0-0",
+      "description": "Laravel project conventions under the Anvil delivery lifecycle standard: scaffold, build pipeline, configuration surface, and verification expectations. Use when working inside a Laravel project managed by Anvil."
+    },
+    {
+      "name": "laravel-delivery",
+      "version": "1.0.0",
+      "asset": "anvil-skill-laravel-delivery-1-0-0",
+      "description": "The Laravel delivery lifecycle under Anvil: activation phases (migrate after promotion, config/route/event caches), rollback and failure semantics, and how to adopt the lifecycle for a Laravel project."
+    }
+  ]
+}
