@@ -61,28 +61,42 @@ The workflow then:
    release.
 3. **Build** — the standard executable for the release platforms
    (linux/darwin × amd64/arm64, `CGO_ENABLED=0`).
-4. **Package** — the release archive
-   `anvil-standard-laravel-<version>.tar.gz`: the platform binaries plus
-   the standard content (source manifest, manifest documentation, lifecycle
-   definition, verification, templates, compatibility, docs, license). The
-   archive is the release content resolved from
-   `distribution.location` at adoption.
-5. **Derive + sign** — the publishable registry metadata document is
-   derived from the source manifest (identity, contract version, capability
-   carried over) with the release-time fields populated from the real
-   release: `distribution` (github-releases, https), `lifecycle`
-   (`published`), and `trust` with the **real SHA-256 content digest** of
-   the archive AND of every platform binary (TS-014-04-04) and an
-   **Ed25519 publisher attestation** over the canonical payload (see Trust
-   below). The source manifest's placeholder trust
-   values are never shipped; the derived document is run through the
-   pipeline's self-parse guard (the strict-parser format surface) and
-   self-verified (integrity + attestation + per-binary digests) before
-   publishing.
-6. **Publish** — creates the GitHub Release with the archive, the registry
-   metadata document, `SHA256SUMS.txt`, and the platform binaries; the
-   release notes carry the attestation public key and a ready-to-use trust
-   anchors snippet.
+ 4. **Package** — the release archive
+    `anvil-standard-laravel-<version>.tar.gz`: the platform binaries plus
+    the standard content (source manifest, manifest documentation, lifecycle
+    definition, verification, templates, compatibility, docs, license, and
+    the authored skills). The archive is the release content resolved from
+    `distribution.location` at adoption.
+ 4.5. **Pack the skills** — the authored skills (`skills/skills.json` +
+    one directory per skill) are packed into per-skill release assets
+    (`anvil-skill-<name>-<version>`, dots normalized to hyphens) by the
+    **vendored, pinned packer** (`cmd/skillpack` + `internal/skillpack` —
+    see [`internal/skillbundle/PIN.md`](../internal/skillbundle/PIN.md):
+    a snapshot of the Core reference packer at commit `c08f4b9`, never
+    Core HEAD). The pack step emits `skills/assets/*` (the release-channel
+    files) and `skills/skills-metadata.json` — the fragment carrying
+    `skills[]` (document root) + the named `trust.contentDigests` entries
+    binding each skill asset to its SHA-256 (TS-021-04). The fragment is
+    merged into the registry metadata document **BEFORE signing** (step 5),
+    so every skill asset is covered by the same publisher attestation as
+    the archive and the binaries (ADR-037 D2; TS-021-06).
+ 5. **Derive + sign** — the publishable registry metadata document is
+    derived from the source manifest (identity, contract version, capability
+    carried over) with the release-time fields populated from the real
+    release: `distribution` (github-releases, https), `lifecycle`
+    (`published`), and `trust` with the **real SHA-256 content digest** of
+    the archive, a NAMED digest per platform binary (TS-014-04-04), and a
+    NAMED digest per skill asset (TS-021-06) and an **Ed25519 publisher
+    attestation** over the canonical payload (see Trust below). The source
+    manifest's placeholder trust values are never shipped; the derived
+    document is run through the pipeline's self-parse guard (the
+    strict-parser format surface, skills section included) and
+    self-verified (integrity + attestation + per-binary + per-skill
+    digests) before publishing.
+ 6. **Publish** — creates the GitHub Release with the archive, the registry
+    metadata document, `SHA256SUMS.txt`, the platform binaries, and the
+    per-skill assets; the release notes carry the attestation public key
+    and a ready-to-use trust anchors snippet.
 7. **Index (stable releases only)** — commits the registry metadata
    document to `registry/index/anvil-standard-laravel/<version>.json` on
    `main`: the add-only static index (ADR-030; the `anvil` registry
@@ -115,22 +129,54 @@ the test index document if one was ever published for that version).
 
 | Artifact | Meaning |
 |---|---|
-| `anvil-standard-laravel-<version>.tar.gz` | The release content: platform binaries + standard parts; the content `distribution.location` resolves and `trust.contentDigests` covers |
-| `registry-metadata-<version>.json` | The registry metadata document of this release (discoverable, installable through the registry flow) |
+| `anvil-standard-laravel-<version>.tar.gz` | The release content: platform binaries + standard parts (incl. the authored skills); the content `distribution.location` resolves and `trust.contentDigests` covers |
+| `registry-metadata-<version>.json` | The registry metadata document of this release (discoverable, installable through the registry flow); declares `skills[]` with the per-skill asset identifiers bound to attested named digests |
 | `registry-metadata-<version>.json.sig` | The DETACHED Ed25519 signature over the raw metadata document bytes (F-1), published only when signing with a STABLE key; the bootstrap installer verifies it with its pinned publisher key before trusting the document's digests |
+| `anvil-skill-<name>-<version>` | One per-skill release asset (the packed skill bundle); declared in `skills[].asset` and bound to a named `trust.contentDigests` entry — `anvil skill install <name>` fetches, verifies, and extracts it |
 | `SHA256SUMS.txt` | Checksums of every asset (same-channel fallback material for adopters without the attestation path) |
 | `binaries/anvil-adapter-laravel-<os>-<arch>` | The standard executable per release platform |
+
+## Skills (TS-021-06)
+
+The authored skills live in [`skills/`](../skills/): `skills.json` (the
+packer input — name, version, description per skill) plus one directory
+per skill carrying a portable `SKILL.md` (agentskills.io; ADR-037 D1).
+This repository is the **authoring source** — the content was seeded from
+the Core fixture
+(`fixtures/standard-skills/anvil-standard-laravel/skills`); authoring
+changes happen here, not in Core.
+
+Every release packs the skills and declares them in its registry metadata
+document (`skills[]` + named `trust.contentDigests` entries). Installing a
+skill (`anvil skill install <name>`) resolves the pinned standard's
+release metadata from the index, verifies the publisher attestation and
+the downloaded asset against the attested named digest (fail-closed), and
+extracts through the strict bundle extractor (ADR-037 D4). Skill content
+versioning is independent of the standard release version: the skill
+`version` is part of the asset identifier
+(`anvil-skill-<name>-<version>`); bump it when the skill's own content
+changes.
+
+The packer is **pinned**: `cmd/skillpack` builds `internal/skillpack` +
+`internal/skillbundle`, a vendored snapshot of the Core reference packer
+(commit `c08f4b9`, contract version 1.0.0 — see
+[`internal/skillbundle/PIN.md`](../internal/skillbundle/PIN.md)). The
+bundle bytes are byte-deterministic, so packing the same content here and
+in Core yields identical digests — the Core real-release E2E test
+(`TestSkillInstall_LiveStandardRelease_FixtureParity`) locks this
+invariant against the live release.
 
 ## Trust (ADR-022)
 
 - **Integrity.** `trust.contentDigests` carries the real SHA-256 digest
   (canonical base16) of the release archive plus a NAMED entry per
   platform binary (TS-014-04-04: `contentDigests[].name` binds the entry
-  to its asset, e.g. `anvil-adapter-laravel-linux-amd64`). At adoption
+  to its asset, e.g. `anvil-adapter-laravel-linux-amd64`) and per skill
+  asset (TS-021-06: `anvil-skill-<name>-<version>`). At adoption
   every declared CONTENT digest must match the recomputed hash of the
-  fetched content (all-match semantics), and every installed binary is
-  verified against its named entry — closing the same-channel, unsigned
-  `SHA256SUMS.txt` trust gap (TS-016-04-01 §6 accepted risk 1).
+  fetched content (all-match semantics), and every installed binary and
+  skill is verified against its named entry — closing the same-channel,
+  unsigned `SHA256SUMS.txt` trust gap (TS-016-04-01 §6 accepted risk 1).
 - **Publisher attestation.** `trust.attestation` is an Ed25519 signature
   over the canonical payload
 
