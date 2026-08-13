@@ -3,7 +3,7 @@
     "title": "Laravel Delivery Lifecycle Standard",
     "description": "Registry metadata for the Laravel delivery lifecycle standard (maleolabs/anvil-standard-laravel): the distributable unit of Laravel framework lifecycle knowledge for the Anvil Runtime. This document is the source manifest of the standard; the release pipeline publishes the release-specific metadata document (same identity, release version, content digests and attestation over the release artifact) per ADR-030 and TS-016-03-02.",
     "id": "anvil-standard-laravel",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "contractVersion": "1.0.0",
     "capability": {
         "frameworkVersion": [

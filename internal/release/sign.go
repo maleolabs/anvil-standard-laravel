@@ -355,6 +355,12 @@ func VerifyBinaryAssetDigests(doc *MetadataDocument, dir string) error {
 		return fmt.Errorf("binaries directory %s is empty — the release declares no binary assets to verify", dir)
 	}
 	for name := range declared {
+		if IsSkillAssetName(name) {
+			// Skill asset entries are verified against the skills assets
+			// directory by VerifySkillAssetDigests (TS-021-06) — their
+			// files never live in the binaries staging dir.
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("declared binary asset %s is missing from %s — every declared digest must have its asset (TS-014-04-04)", name, dir)
 		}

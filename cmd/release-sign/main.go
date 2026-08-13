@@ -84,9 +84,9 @@ Usage:
   release-sign generate --out <dir>
   release-sign sign --manifest <source.json> --version <v> --archive <path>
       --location <url> --key <private.pem> [--binaries <dir>]
-      [--out <doc.json>] [--sig <doc.json.sig>]
+      [--skills <fragment.json>] [--out <doc.json>] [--sig <doc.json.sig>]
   release-sign verify --document <doc.json> --archive <path>
-      [--binaries <dir>] [--sig <doc.json.sig>]
+      [--binaries <dir>] [--skills <assets-dir>] [--sig <doc.json.sig>]
 
 Subcommands:
   generate   create a release signing key pair (release-signing-key.pem,
@@ -97,18 +97,23 @@ Subcommands:
              lifecycle, trust) and sign the canonical attestation payload
              with --key; --binaries <dir> additionally attests every
              binary asset in <dir> as a named contentDigests entry
-             (TS-014-04-04); --sig <path> writes the DETACHED Ed25519
-             signature over the raw document bytes (base64, F-1) — the
-             sibling release asset registry-metadata-<v>.json.sig the
-             bootstrap installer verifies with its pinned publisher key;
-             writes the document to --out (default stdout)
+             (TS-014-04-04); --skills <fragment> merges the pack step's
+             skills[] declarations + named skill-asset digests into the
+             document BEFORE signing (TS-021-06); --sig <path> writes the
+             DETACHED Ed25519 signature over the raw document bytes
+             (base64, F-1) — the sibling release asset
+             registry-metadata-<v>.json.sig the bootstrap installer
+             verifies with its pinned publisher key; writes the document
+             to --out (default stdout)
   verify     verify the document against the release content: integrity
              (every declared content digest vs recomputed sha-256) and
              attestation (Ed25519 over the canonical payload with the
              declared public key); with --binaries <dir>, also verify
              every binary asset against its declared named digest; with
-             --sig <path>, also verify the detached signature over the
-             raw document bytes with the declared public key
+             --skills <assets-dir>, also verify every skill asset
+             against its declared named digest; with --sig <path>, also
+             verify the detached signature over the raw document bytes
+             with the declared public key
 `)
 }
 
@@ -138,6 +143,7 @@ func runSign(args []string) int {
 	location := fs.String("location", "", "https distribution.location of the archive on the release channel")
 	key := fs.String("key", "", "path of the Ed25519 signing private key (PEM PKCS#8)")
 	binaries := fs.String("binaries", "", "path of the platform binaries staging directory (binaries/); every regular file becomes a named attestation-bound contentDigests entry (TS-014-04-04)")
+	skills := fs.String("skills", "", "path of the pack fragment (skills-metadata.json from cmd/skillpack): the skills[] declarations + the named contentDigests entries binding each skill asset to its digest, merged into the document BEFORE signing (TS-021-06)")
 	sig := fs.String("sig", "", "path of the detached document signature asset (registry-metadata-<v>.json.sig): the Ed25519 signature over the raw document bytes, base64 (F-1)")
 	out := fs.String("out", "", "path of the produced registry metadata document (default: stdout)")
 	if err := fs.Parse(args); err != nil {
@@ -196,8 +202,28 @@ func runSign(args []string) int {
 		}
 		contentDigests = append(contentDigests, binDigests...)
 	}
+	// The skill fragment (TS-021-06): the pack step's named skill-asset
+	// digests are appended AFTER the archive and binary digests, so the
+	// array order is deterministic and the attestation payload (which
+	// concatenates the digests in array order) signs every skill digest
+	// — an attested named digest an adopter's skill install verifies
+	// against (fail-closed). MergeSkillsFragment then folds the fragment
+	// (digests + skills[]) into the document.
+	var skillsFrag *release.SkillsFragment
+	if *skills != "" {
+		frag, err := release.ReadSkillsFragment(*skills)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		skillsFrag = frag
+	}
+	payloadDigests := contentDigests
+	if skillsFrag != nil {
+		payloadDigests = append(append([]release.ContentDigest{}, contentDigests...), skillsFrag.Trust.ContentDigests...)
+	}
 
-	payload, err := release.AttestationPayload(src.ID, *version, contentDigests)
+	payload, err := release.AttestationPayload(src.ID, *version, payloadDigests)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -206,6 +232,16 @@ func runSign(args []string) int {
 	publicKey := release.PublicKeyBase64(priv)
 
 	doc := release.DeriveDocument(src, *version, *location, contentDigests, signature, publicKey)
+	// The pack fragment merge (skills[] at the document root) happens
+	// BEFORE the self-parse guard and BEFORE the detached document
+	// signature covers the bytes: the published document carries the
+	// declared skills bound to the attested named digests.
+	if skillsFrag != nil {
+		if err := release.MergeSkillsFragment(doc, skillsFrag); err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot merge the skills fragment: %v\n", err)
+			return 1
+		}
+	}
 	// Self-parse guard: never write a document the strict registry parser
 	// would reject (TS-016-03-02 review finding; the release pipeline never
 	// publishes material it cannot verify).
@@ -239,8 +275,9 @@ func runSign(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	fmt.Printf("wrote %s (id %s, version %s, %d content digest(s), %d named binary digest(s))\n",
-		*out, doc.ID, doc.Version, len(contentDigests)-len(binDigestsFor(doc)), len(binDigestsFor(doc)))
+	fmt.Printf("wrote %s (id %s, version %s, %d content digest(s), %d named asset digest(s), %d skill(s))\n",
+		*out, doc.ID, doc.Version,
+		len(doc.Trust.ContentDigests)-len(binDigestsFor(doc)), len(binDigestsFor(doc)), len(doc.Skills))
 	fmt.Printf("public key (base64): %s\n", publicKey)
 	return 0
 }
@@ -250,6 +287,7 @@ func runVerify(args []string) int {
 	document := fs.String("document", "", "path of the produced registry metadata document")
 	archive := fs.String("archive", "", "path of the release archive (the release content)")
 	binaries := fs.String("binaries", "", "path of the platform binaries staging directory (binaries/); every binary asset is verified against its declared named digest (TS-014-04-04)")
+	skills := fs.String("skills", "", "path of the skills assets directory (skills/assets/); every skill asset is verified against its declared named digest (TS-021-06)")
 	sig := fs.String("sig", "", "path of the detached document signature asset (registry-metadata-<v>.json.sig); the signature is verified over the RAW document bytes with the document's declared public key (F-1)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -276,6 +314,12 @@ func runVerify(args []string) int {
 	if *binaries != "" {
 		if err := release.VerifyBinaryAssetDigests(doc, *binaries); err != nil {
 			fmt.Fprintf(os.Stderr, "error: binary asset verification failed: %v\n", err)
+			return 1
+		}
+	}
+	if *skills != "" {
+		if err := release.VerifySkillAssetDigests(doc, *skills); err != nil {
+			fmt.Fprintf(os.Stderr, "error: skill asset verification failed: %v\n", err)
 			return 1
 		}
 	}

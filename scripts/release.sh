@@ -25,14 +25,20 @@
 #      release — closing the same-channel-checksum trust gap
 #      (TS-016-04-01 §6 accepted risk 1; Core verifies every installed
 #      binary against these digests, TS-014-04-04);
+#   5.5 pack the authored skills (skills/) into per-skill release assets
+#      and emit the release-metadata fragment (skills[] + named
+#      contentDigests) with the VENDORED, PINNED packer (cmd/skillpack;
+#      TS-021-06 — the fragment is merged into the metadata document
+#      BEFORE signing, so every skill asset is attestation-bound like the
+#      binaries);
 #   6. sign the canonical attestation payload (Ed25519; the payload is
 #      utf8(id) || 0x00 || utf8(version) || 0x00 || concat(decoded digest
 #      bytes in contentDigests array order) — the exact composition the
 #      Core registry client verifies, internal/registry/trust.go) with the
 #      release signing key; the signature binds the archive AND every
-#      binary asset;
-#   7. self-verify the produced document and binaries (the release
-#      pipeline never publishes material it cannot verify);
+#      binary asset AND every skill asset;
+#   7. self-verify the produced document, binaries, and skill assets (the
+#      release pipeline never publishes material it cannot verify);
 #   8. [stable key only] emit the DETACHED document signature
 #      registry-metadata-<v>.json.sig — an Ed25519 signature over the RAW
 #      metadata document bytes, DISTINCT from the in-document canonical
@@ -95,8 +101,9 @@ REPO_URL="https://github.com/${REPO}"
 
 # Standard content carried by the release archive (the artifact set: the
 # standard executable for the release platforms plus the standard parts —
-# manifest, lifecycle, verification, templates, compatibility, docs). The
-# platform binaries are staged separately (see below).
+# manifest, lifecycle, verification, templates, compatibility, docs, and
+# the authored skills). The platform binaries are staged separately (see
+# below).
 ARCHIVE_PARTS=(
     "manifest"
     "MANIFEST.md"
@@ -107,6 +114,7 @@ ARCHIVE_PARTS=(
     "verification"
     "templates"
     "compatibility"
+    "skills"
 )
 
 # Release platforms (Core release.yml matrix pattern).
@@ -259,6 +267,26 @@ if [ "${GENERATE_KEY}" -eq 1 ] && [ ! -s "${KEY_FILE}" ]; then
     go run "./cmd/release-sign" generate --out "${KEY_DIR}" >/dev/null
 fi
 
+# ── 5.5 Pack the standard skills (TS-021-06; ADR-037 D2) ───────────
+# The authored skills (skills/skills.json + one directory per skill) are
+# packed into per-skill release assets (anvil-skill-<name>-<version>,
+# dots normalized to hyphens) and the release-metadata fragment
+# (skills[] + named contentDigests) is emitted. The packer is the
+# VENDORED, PINNED packer of this repository (cmd/skillpack +
+# internal/skillpack — see internal/skillbundle/PIN.md): it is built from
+# THIS release commit, never from Core HEAD. The fragment is merged into
+# the registry metadata document BEFORE signing (step 6), so the skill
+# assets are covered by the same publisher attestation as the archive
+# and the binaries.
+SKILLS_DIR="${ROOT_DIR}/skills"
+SKILLS_OUT="${OUT_DIR}/skills"
+log "packing standard skills (${SKILLS_DIR})"
+go run "./cmd/skillpack" --standard "${STANDARD_ID}" --content "${SKILLS_DIR}" --out "${SKILLS_OUT}"
+SKILLS_FRAGMENT="${SKILLS_OUT}/skills-metadata.json"
+SKILLS_ASSETS="${SKILLS_OUT}/assets"
+log "skills fragment: ${SKILLS_FRAGMENT}"
+log "skills assets:   ${SKILLS_ASSETS}"
+
 # ── 6. Derive + sign the registry metadata document ────────────────
 DIST_LOCATION="${REPO_URL}/releases/download/v${TAG_VERSION}/${ARCHIVE_NAME}"
 META_DOC="${OUT_DIR}/registry-metadata-${META_VERSION}.json"
@@ -277,13 +305,14 @@ go run "./cmd/release-sign" sign \
     --location "${DIST_LOCATION}" \
     --key "${KEY_FILE}" \
     --binaries "${OUT_DIR}/binaries" \
+    --skills "${SKILLS_FRAGMENT}" \
     "${SIG_ARGS[@]}" \
     --out "${META_DOC}"
 PUBLIC_KEY="$(jq -r '.trust.attestation.publicKey' "${META_DOC}")"
 log "registry metadata document: ${META_DOC}"
 
 # ── 7. Self-verify the produced release ────────────────────────────
-VERIFY_ARGS=("--document" "${META_DOC}" "--archive" "${ARCHIVE}" "--binaries" "${OUT_DIR}/binaries")
+VERIFY_ARGS=("--document" "${META_DOC}" "--archive" "${ARCHIVE}" "--binaries" "${OUT_DIR}/binaries" "--skills" "${SKILLS_ASSETS}")
 if [ "${GENERATE_KEY}" -eq 0 ]; then
     VERIFY_ARGS+=(--sig "${OUT_DIR}/registry-metadata-${META_VERSION}.json.sig")
 fi
@@ -294,7 +323,7 @@ log "self-verification: PASS"
 (
     cd "${OUT_DIR}"
     sha256sum_portable "${ARCHIVE_NAME}" "registry-metadata-${META_VERSION}.json" \
-        binaries/* > SHA256SUMS.txt
+        binaries/* skills/assets/* > SHA256SUMS.txt
 )
 log "checksums: ${OUT_DIR}/SHA256SUMS.txt"
 cat > "${OUT_DIR}/trust-anchors.snippet.json" <<EOF
@@ -330,9 +359,10 @@ Release of the Laravel delivery lifecycle standard, registry version
 
 ## Artifacts
 
-- \`${ARCHIVE_NAME}\` — the release content (platform binaries + standard parts); distribution.location of this release
-- \`registry-metadata-${META_VERSION}.json\` — the registry metadata document (id, version, contract version, capability, distribution, lifecycle, trust)$(if [ "${GENERATE_KEY}" -eq 0 ]; then echo "
+- \`${ARCHIVE_NAME}\` — the release content (platform binaries + standard parts incl. the authored skills); distribution.location of this release
+- \`registry-metadata-${META_VERSION}.json\` — the registry metadata document (id, version, contract version, capability, distribution, lifecycle, trust, skills)$(if [ "${GENERATE_KEY}" -eq 0 ]; then echo "
 - \`registry-metadata-${META_VERSION}.json.sig\` — the DETACHED Ed25519 signature over the raw metadata document bytes (F-1): the bootstrap installer verifies it with its pinned publisher key before trusting the document's digests"; fi)
+- \`anvil-skill-*\` — the per-skill release assets (one per declared skill; bound to the attestation-bound named digests in \`trust.contentDigests\` — TS-021-06)
 - \`SHA256SUMS.txt\` — checksums of every asset (same-channel fallback material for adopters without the attestation path)
 
 ## Trust (ADR-022)
@@ -340,12 +370,12 @@ Release of the Laravel delivery lifecycle standard, registry version
 This release is signed with an Ed25519 release-time key over the canonical
 attestation payload (\`utf8(id) || 0x00 || utf8(version) || 0x00 ||
 concat(decoded digest bytes in contentDigests array order)\`). The
-attestation binds the release archive AND every platform binary: each
-binary's sha-256 digest is carried as a NAMED \`trust.contentDigests\`
-entry (TS-014-04-04), so an adoption verifies each installed binary
-against attestation-bound material — not only the same-channel
-\`SHA256SUMS.txt\`. Pin the public key out of band to establish publisher
-origin (no first-use acceptance):
+attestation binds the release archive, every platform binary, AND every
+skill asset: each asset's sha-256 digest is carried as a NAMED
+\`trust.contentDigests\` entry (TS-014-04-04 / TS-021-06), so an adoption
+verifies each installed binary and skill against attestation-bound
+material — not only the same-channel \`SHA256SUMS.txt\`. Pin the public
+key out of band to establish publisher origin (no first-use acceptance):
 
 \`\`\`json
 {
@@ -366,6 +396,7 @@ EOF
         "${ARCHIVE}" \
         "${META_DOC}" \
         "${SIG_ASSET[@]}" \
+        "${SKILLS_ASSETS}"/* \
         "${OUT_DIR}/SHA256SUMS.txt"
     log "GitHub release v${TAG_VERSION}: published (${REPO_URL}/releases/tag/v${TAG_VERSION})"
 fi
@@ -374,6 +405,7 @@ fi
 log "release ${STANDARD_ID} ${META_VERSION} ready in ${OUT_DIR}"
 log "  archive:             ${ARCHIVE_NAME}"
 log "  metadata document:   registry-metadata-${META_VERSION}.json"
+log "  skills:              ${SKILLS_ASSETS} (declared in skills[], attestation-bound)"
 log "  distribution:        ${DIST_LOCATION}"
 log "  attestation key:     ${PUBLIC_KEY}"
 log "  trust anchors:       ${OUT_DIR}/trust-anchors.snippet.json"
